@@ -1,7 +1,7 @@
-from backend.src.models import State
 from fastapi import FastAPI
 from sqlmodel import select
 from src.database import SessionDep, create_db_and_tables
+from src.models import State
 
 app = FastAPI()
 
