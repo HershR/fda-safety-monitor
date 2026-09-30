@@ -1,4 +1,4 @@
-from database import SessionDep, create_db_and_tables
+from database import SessionDep
 from fastapi import FastAPI
 from models import State
 from sqlmodel import select
@@ -6,12 +6,7 @@ from sqlmodel import select
 app = FastAPI()
 
 
-@app.on_event("startup")
-def on_startup():
-    create_db_and_tables()
-
-
 @app.get("/states/")
-def get_states(session: SessionDep) -> list[State]:
+def get_states(session: SessionDep, response_model=list[State]):
     states = session.exec(select(State)).all()
-    return list(states)
+    return states
