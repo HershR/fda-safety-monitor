@@ -1,8 +1,8 @@
 from typing import Annotated
 
+from config import *
 from fastapi import Depends
 from sqlmodel import Session, SQLModel, create_engine
-from src.config import *
 
 DATABASE_URL = (
     f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
