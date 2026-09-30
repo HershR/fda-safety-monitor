@@ -2,3 +2,4 @@ fastapi==0.142.1
 psycopg==3.3.6
 psycopg-binary==3.3.6
 sqlalchemy>=2.0.0
+sqlmodel==0.0.47
