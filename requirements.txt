@@ -109,6 +109,7 @@ rpds-py==2026.6.3
 Send2Trash==2.1.0
 six==1.17.0
 soupsieve==2.10
+SQLAlchemy==2.1.1
 stack-data==0.6.3
 starlette==1.7.0
 streamlit==1.64.0
