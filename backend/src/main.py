@@ -9,4 +9,5 @@ app = FastAPI()
 @app.get("/states/")
 def get_states(session: SessionDep, response_model=list[State]):
     states = session.exec(select(State)).all()
-    return states
+
+    return ["CA", "TX", *states]
