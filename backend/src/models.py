@@ -1,8 +1,9 @@
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from enums import PathogenSource
 from sqlmodel import Field, SQLModel
+
+from src.enums import PathogenSource
 
 
 class State(SQLModel, table=True):

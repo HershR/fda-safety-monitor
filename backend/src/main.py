@@ -1,9 +1,15 @@
-from database import SessionDep
 from fastapi import FastAPI
-from models import State
 from sqlmodel import select
 
+from src.database import SessionDep, create_db_and_tables
+from src.models import State
+
 app = FastAPI()
+
+
+@app.on_event("startup")
+def on_startup():
+    create_db_and_tables()
 
 
 @app.get("/states/")
