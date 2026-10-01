@@ -8,6 +8,8 @@ services:
         condition: service_healthy
     ports:
       - "8080:8080"
+    volumes:
+      - ./src:/src/
     environment:
       DB_HOST: db
       DB_USER: ${DB_USER}
