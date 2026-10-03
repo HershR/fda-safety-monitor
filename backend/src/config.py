@@ -1,5 +1,6 @@
 import os
 
+GCS_BUCKET = os.getenv("GCS_BUCKET")
 DB_NAME = os.getenv("DB_NAME", "fda_data")
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
