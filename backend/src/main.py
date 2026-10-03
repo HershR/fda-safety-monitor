@@ -1,10 +1,10 @@
 from fastapi import FastAPI
-from sqlmodel import select
 
-from src.database import SessionDep, create_db_and_tables
-from src.models import State
+from src.api.router import api_router
+from src.database import create_db_and_tables
 
 app = FastAPI()
+app.include_router(api_router)
 
 
 @app.on_event("startup")
@@ -12,7 +12,6 @@ def on_startup():
     create_db_and_tables()
 
 
-@app.get("/states/")
-def get_states(session: SessionDep, response_model=list[State]):
-    states = session.exec(select(State)).all()
-    return states
+@app.get("/")
+def get_root():
+    return {"message": "fda monitor backend running"}
