@@ -28,12 +28,12 @@ class RecallEvent(SQLModel, table=True):
     state_code: str = Field(max_length=2, foreign_key="state.state_code")
     classification: str
     recall_initiation_date: date
-    center_classification_date: date
+    center_classification_date: date | None = None
     report_date: date
     status: str
     voluntary_mandated: str
     recalling_firm: str
-    classification_lag_days: int
+    classification_lag_days: int |None = None
     product_count: int
     collected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
