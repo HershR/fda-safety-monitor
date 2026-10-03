@@ -26,7 +26,7 @@ All four sources are free, public, and need no API key. Last checked 2026-09-30.
 | 1 | [openFDA Food Enforcement](https://api.fda.gov/food/enforcement.json) | API | Official FDA food recalls from 2012 on. Includes recall class, company state, and initiation, classification, and report dates | Weekly | None |
 | 2 | [FDA Recall Announcements](https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts) | Scraped | Recall announcements as companies post them: date, brand, product, category, reason, company. No state field | Daily | 30s delay between requests |
 | 3 | [CDC BEAM Dashboard](https://data.cdc.gov/Foodborne-Waterborne-and-Related-Diseases/BEAM-Dashboard-Report-Data/jbhn-e8xn/about_data) | API | Lab confirmed Salmonella, STEC, Campylobacter, Shigella, and Vibrio samples by state, month, and source type | Monthly | None |
-| 4 | [USASpending](https://api.usaspending.gov/api/v2/agency/075/sub_agency/?fiscal_year=2025) | API | FDA spending by fiscal year, listed under HHS (agency `075`) | Continuous, past years get revised | None |
+| 4 | [USASpending](https://api.usaspending.gov/api/v2/agency/075/sub_agency/?fiscal_year=2025) | API | FDA spending by fiscal year, listed under HHS (agency 075) | Daily | None |
 
 ---
 
@@ -44,6 +44,7 @@ We use the CDC human sample counts to check the recall data. Fewer inspections c
 ### Prerequisites
 - Python 3.13
 - Docker Desktop
+- A GCP service account JSON key with write access to the project's Cloud Storage bucket
 
 ### 1. Clone the repository
 ```bash
@@ -53,9 +54,11 @@ cd fda-safety-monitor
 
 ### 2. Install dependencies
 ```bash
+# install deps for both backend and frontend
+# for local development
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt 
 pre-commit install
 ```
 
@@ -65,7 +68,7 @@ cd backend
 cp .env.template .env
 ```
 
-Set `DB_PASS` in `.env` to any password.
+Fill in `DB_PASSWORD` and the GCP values in `.env`.
 
 | Variable | Description | Example |
 | --- | --- | --- |
@@ -73,7 +76,13 @@ Set `DB_PASS` in `.env` to any password.
 | `DB_HOST` | Database host (set to `db` inside Docker) | `localhost` |
 | `DB_PORT` | Database port | `5432` |
 | `DB_USER` | Database user | `postgres` |
-| `DB_PASS` | Database password | `changeme` |
+| `DB_PASSWORD` | Database password | `your-db-password` |
+| `GCP_PROJECT_ID` | GCP project ID | `your-project-name` |
+| `GCP_BUCKET_NAME` | Bucket the scraper writes to | `fda-monitor-raw` |
+| `GCP_SERVICE_ACCOUNT_KEY` | Path to the key inside the container | `/tmp/gcp-key.json` |
+| `LOCAL_GCP_SERVICE_ACCOUNT_KEY` | Path to the key on your machine | `/Users/you/keys/gcp-key.json` |
+
+Docker mounts `LOCAL_GCP_SERVICE_ACCOUNT_KEY` into the container at `GCP_SERVICE_ACCOUNT_KEY`, so the local path must be set before starting the containers.
 
 ### 4. Start the backend
 From `backend/`:
@@ -97,13 +106,14 @@ docker compose down -v
 ```
 
 ### 5. Call the API
+Run the recall scraper. It pulls the last year of openFDA recalls and the current FDA food recall announcements, then writes them to `fda_recalls/` in the bucket:
 ```python
 import requests
 
-requests.get("http://localhost:8080/states/").json()
+requests.post("http://localhost:8080/fda-recalls/scrape/").json()
 ```
 
-Routes live in `backend/src/main.py`.
+The response has the number of rows written for each table. See [backend/README.md](backend/README.md) for the full list of routes.
 
 ---
 
@@ -112,6 +122,12 @@ Routes live in `backend/src/main.py`.
 .
 ├── backend/
 │   ├── src/
+│   │   ├── api/
+│   │   │   ├── routes/
+│   │   │   │   ├── fiscal_years.py
+│   │   │   │   ├── recall_scraper.py
+│   │   │   │   └── states.py
+│   │   │   └── router.py
 │   │   ├── main.py
 │   │   ├── models.py
 │   │   ├── database.py
@@ -120,6 +136,7 @@ Routes live in `backend/src/main.py`.
 │   ├── Dockerfile
 │   ├── docker-compose.yaml
 │   ├── requirements.txt
+│   ├── .dockerignore
 │   ├── .env.template
 │   └── README.md
 ├── frontend/
