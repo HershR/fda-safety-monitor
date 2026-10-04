@@ -5,11 +5,11 @@ A dashboard that tracks US food recalls and foodborne illness alongside FDA spen
 
 | Name | GitHubID | Role / Focus |
 | --- | --- | --- |
-| Chris | tophercruzio | API Aficionado |
-| Hersh | HershR | Team Leader |
-| Paul | pryu11 | Schema Structure Engineering Intern |
-| Carlos | ccamposlozano | Deployment Engineering |
-| Dylan | DylanSidhu03 | Technical Writer / Project Assistant |
+| Chris | tophercruzio | Data Engineer. Data cleaning and api endpoints |
+| Hersh | HershR | Backend/Database engineer |
+| Paul | pryu11 | Data Engineer. Data cleaning and api endpoints |
+| Carlos | ccamposlozano | GCP Deployment Engineer |
+| Dylan | DylanSidhu03 | Frontend engineer and Dashboard visualizations |
 
 ---
 
