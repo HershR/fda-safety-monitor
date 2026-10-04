@@ -10,19 +10,22 @@ services:
       - "8080:8080"
     volumes:
       - ./src:/src/
+      - ${LOCAL_GCP_SERVICE_ACCOUNT_KEY}:/${GCP_SERVICE_ACCOUNT_KEY}
     environment:
       DB_HOST: db
       DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASS}
+      DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
+    env_file:
+      - .env
   db:
     image: postgres:18
     restart: always
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
       - "5439:5432"
     volumes:
