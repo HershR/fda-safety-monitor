@@ -25,7 +25,7 @@ class RecallEvent(SQLModel, table=True):
     __tablename__ = "recall_event"
 
     event_id: str = Field(primary_key=True)
-    state_code: str = Field(max_length=2, foreign_key="state.state_code")
+    state_code: str | None = Field(default=None, max_length=2, foreign_key="state.state_code")
     classification: str
     recall_initiation_date: date
     center_classification_date: date | None = None
