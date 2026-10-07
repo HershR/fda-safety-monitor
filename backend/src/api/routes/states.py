@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from src.database import SessionDep
 from src.models import State
@@ -24,13 +25,14 @@ async def get_state(session: SessionDep, state_code: str):
     return result
 
 
-@router.post("/", status_code=201, response_model=State)
-async def create_state(session: SessionDep, state: State):
+@router.post("/find_or_create", status_code=201, response_model=State)
+async def find_or_create_state(session: SessionDep, state: State):
+    existing_state = session.exec(
+        select(State).where(State.state_code == state.state_code)
+    ).first()
+    if existing_state:
+        return existing_state
     session.add(state)
-    try:
-        session.commit()
-    except BaseException as e:
-        print(e)
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+    session.commit()
     session.refresh(state)
     return state

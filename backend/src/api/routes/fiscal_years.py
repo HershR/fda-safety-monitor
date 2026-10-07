@@ -24,13 +24,18 @@ async def get_fiscal_year(session: SessionDep, year: int):
     return result
 
 
-@router.post("/", status_code=201, response_model=FiscalYear)
-async def create_fiscal_year(session: SessionDep, fiscal_year: FiscalYear):
+@router.post("/find_or_create", status_code=201, response_model=FiscalYear)
+async def find_or_create_fiscal_year(
+    session: SessionDep, fiscal_year: FiscalYear
+):
+    existing_state = session.exec(
+        select(FiscalYear).where(
+            FiscalYear.fiscal_year == fiscal_year.fiscal_year
+        )
+    ).first()
+    if existing_state:
+        return existing_state
     session.add(fiscal_year)
-    try:
-        session.commit()
-    except BaseException as e:
-        print(e)
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+    session.commit()
     session.refresh(fiscal_year)
     return fiscal_year
