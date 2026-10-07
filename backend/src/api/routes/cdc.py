@@ -7,6 +7,7 @@ from google.oauth2 import service_account
 from src.config import GCP_BUCKET, GCP_PROJECT_ID, GCP_SERVICE_ACCOUNT_KEY
 from src.enums import PathogenSource
 from src.models import IllnessMonthly
+from datetime import date
 
 router = APIRouter()
 
@@ -83,7 +84,8 @@ def scrape():
     bucket = storage.Client(
         project=GCP_PROJECT_ID, credentials=credentials
     ).bucket(GCP_BUCKET)
-    bucket.blob("illness_monthly/illness_monthly.json").upload_from_string(
+    today = date.today().isoformat()
+    bucket.blob(f"illness_monthly/{today}_illness_monthly.json").upload_from_string(
         json.dumps([r.model_dump(mode="json") for r in rows]),
         content_type="application/json",
     )
