@@ -80,7 +80,8 @@ def scrape():
     bucket = storage.Client(
         project=GCP_PROJECT_ID, credentials=credentials
     ).bucket(GCP_BUCKET)
-    bucket.blob("fda_funding/fda_funding.json").upload_from_string(
+    today = date.today().isoformat()
+    bucket.blob(f"fda_funding/{today}_fda_funding.json").upload_from_string(
         json.dumps([r.model_dump(mode="json") for r in rows]),
         content_type="application/json",
     )
