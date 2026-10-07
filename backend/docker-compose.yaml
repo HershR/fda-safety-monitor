@@ -10,6 +10,7 @@ services:
       - "8080:8080"
     volumes:
       - ./src:/src/
+      - ./data:/src/data/
       - ${LOCAL_GCP_SERVICE_ACCOUNT_KEY}:/${GCP_SERVICE_ACCOUNT_KEY}
     environment:
       DB_HOST: db
