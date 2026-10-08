@@ -6,9 +6,7 @@ from datetime import date, datetime, timedelta
 import requests
 from bs4 import BeautifulSoup
 from fastapi import APIRouter
-from google.cloud import storage
-from google.oauth2 import service_account
-from src.config import GCP_BUCKET, GCP_PROJECT_ID, GCP_SERVICE_ACCOUNT_KEY
+from src.gcp_service import get_bucket, get_credientials
 from src.models import RecallAnnouncement, RecallEvent, RecallProduct
 
 router = APIRouter()
@@ -137,14 +135,8 @@ def scrape():
         "recall_event": events,
         "recall_product": products,
     }
-    service_account_key = GCP_SERVICE_ACCOUNT_KEY
-    project_id = GCP_PROJECT_ID
-    credentials = service_account.Credentials.from_service_account_file(
-        service_account_key
-    )
-    bucket = storage.Client(
-        project=project_id, credentials=credentials
-    ).bucket(GCP_BUCKET)
+    credentials = get_credientials()
+    bucket = get_bucket(credentials)
     for name, rows in tables.items():
         bucket.blob(f"fda_recalls/{name}.json").upload_from_string(
             json.dumps([r.model_dump(mode="json") for r in rows]),

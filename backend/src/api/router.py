@@ -1,5 +1,11 @@
 from fastapi import APIRouter
-from src.api.routes import cdc, fiscal_years, recall_scraper, states, usaspending
+from src.api.routes import (
+    cdc,
+    fiscal_years,
+    recall_scraper,
+    states,
+    usaspending,
+)
 
 api_router = APIRouter()
 

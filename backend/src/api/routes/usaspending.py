@@ -4,9 +4,7 @@ from decimal import Decimal
 
 import requests
 from fastapi import APIRouter
-from google.cloud import storage
-from google.oauth2 import service_account
-from src.config import GCP_BUCKET, GCP_PROJECT_ID, GCP_SERVICE_ACCOUNT_KEY
+from src.gcp_service import get_bucket, get_credientials
 from src.models import FDAFunding
 
 router = APIRouter()
@@ -74,12 +72,8 @@ def scrape_fda_funding() -> list[FDAFunding]:
 def scrape():
     rows = scrape_fda_funding()
 
-    credentials = service_account.Credentials.from_service_account_file(
-        GCP_SERVICE_ACCOUNT_KEY
-    )
-    bucket = storage.Client(
-        project=GCP_PROJECT_ID, credentials=credentials
-    ).bucket(GCP_BUCKET)
+    credentials = get_credientials()
+    bucket = get_bucket(credentials)
     today = date.today().isoformat()
     bucket.blob(f"fda_funding/{today}_fda_funding.json").upload_from_string(
         json.dumps([r.model_dump(mode="json") for r in rows]),
