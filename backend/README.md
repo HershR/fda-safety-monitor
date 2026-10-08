@@ -55,21 +55,31 @@ docker compose down -v
 | GET | `/` | Health check |
 | GET | `/states/` | List all states |
 | GET | `/states/{state_code}` | Get one state |
-| POST | `/states/` | Add a state |
+| POST | `/states/find_or_create` | Add a state, or return it if it already exists |
 | GET | `/fiscal_years/` | List all fiscal years |
 | GET | `/fiscal_years/{year}` | Get one fiscal year |
-| POST | `/fiscal_years/` | Add a fiscal year |
+| POST | `/fiscal_years/find_or_create` | Add a fiscal year, or return it if it already exists |
 | POST | `/fda-recalls/scrape/` | Pull openFDA recalls from the last year and current FDA food recall announcements, then upload them to `fda_recalls/` in the bucket as `recall_event.json`, `recall_product.json`, and `recall_announcement.json` |
+| POST | `/cdc/scrape/` | Pull monthly CDC BEAM illness counts by state and upload them to `illness_monthly/{date}_illness_monthly.json` |
+| POST | `/usaspending/scrape/` | Pull FDA spending for each fiscal year since 2017 and upload it to `fda_funding/{date}_fda_funding.json` |
+
+## Seed data
+On startup the server loads states and fiscal years from `data/state_codes.json` and `data/fiscal_years.json`. Rows that are already in the database are skipped, so restarts don't create duplicates.
+
+To add a fiscal year or state, add it to the JSON file and restart the server. Editing a row that's already in the JSON won't change the database. Update that row directly instead.
 
 ## Code layout
 ```
+data/                    # JSON for the state and fiscal_year tables
 src/
 ├── api/
 │   ├── routes/          # One file per resource
 │   └── router.py        # Registers each route file under its prefix
-├── main.py              # App entry point, creates tables on startup
+├── main.py              # App entry point, creates and seeds tables on startup
 ├── models.py            # SQLModel tables
 ├── database.py          # Engine and session dependency
+├── seed_db.py           # Loads data/ into the database
+├── gcp_service.py       # Cloud Storage bucket access
 ├── config.py            # Reads environment variables
 └── enums.py
 ```

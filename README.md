@@ -90,7 +90,7 @@ From `backend/`:
 docker compose up -d
 ```
 
-The API runs at http://localhost:8080 (docs at `/docs`) and Postgres at `localhost:5439`. The server reloads on code changes. If it doesn't, or you changed `requirements.txt`, rebuild:
+The API runs at http://localhost:8080 (docs at `/docs`) and Postgres at `localhost:5439`. On startup the server fills the `state` and `fiscal_year` tables from `backend/data/`. The server reloads on code changes. If it doesn't, or you changed `requirements.txt`, rebuild:
 ```bash
 docker compose up --build -d
 ```
@@ -106,14 +106,22 @@ docker compose down -v
 ```
 
 ### 5. Call the API
-Run the recall scraper. It pulls the last year of openFDA recalls and the current FDA food recall announcements, then writes them to `fda_recalls/` in the bucket:
+Each scraper pulls data from one source and saves it as JSON in the bucket:
 ```python
 import requests
 
-requests.post("http://localhost:8080/fda-recalls/scrape/").json()
+requests.post(
+    "http://localhost:8080/fda-recalls/scrape/"
+).json()  # openFDA recalls + FDA announcements
+requests.post(
+    "http://localhost:8080/cdc/scrape/"
+).json()  # CDC BEAM illness counts
+requests.post(
+    "http://localhost:8080/usaspending/scrape/"
+).json()  # FDA spending
 ```
 
-The response has the number of rows written for each table. See [backend/README.md](backend/README.md) for the full list of routes.
+Each response has the number of rows written for each table. See [backend/README.md](backend/README.md) for the full list of routes.
 
 ---
 
@@ -121,16 +129,23 @@ The response has the number of rows written for each table. See [backend/README.
 ```
 .
 ├── backend/
+│   ├── data/
+│   │   ├── fiscal_years.json
+│   │   └── state_codes.json
 │   ├── src/
 │   │   ├── api/
 │   │   │   ├── routes/
+│   │   │   │   ├── cdc.py
 │   │   │   │   ├── fiscal_years.py
 │   │   │   │   ├── recall_scraper.py
-│   │   │   │   └── states.py
+│   │   │   │   ├── states.py
+│   │   │   │   └── usaspending.py
 │   │   │   └── router.py
 │   │   ├── main.py
 │   │   ├── models.py
 │   │   ├── database.py
+│   │   ├── seed_db.py
+│   │   ├── gcp_service.py
 │   │   ├── config.py
 │   │   └── enums.py
 │   ├── Dockerfile
@@ -145,6 +160,7 @@ The response has the number of rows written for each table. See [backend/README.
 ├── documents/
 │   └── postgres-erd.md
 ├── requirements.txt
+├── .gitattributes
 ├── .pre-commit-config.yaml
 ├── .python-version
 └── README.md
