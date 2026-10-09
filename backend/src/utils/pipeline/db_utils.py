@@ -1,4 +1,4 @@
-# Paritally inspired by this discussion: https://github.com/fastapi/sqlmodel/issues/59
+# Referenced discussion: https://github.com/fastapi/sqlmodel/issues/59
 from itertools import batched
 
 from sqlalchemy.dialects.postgresql import insert
