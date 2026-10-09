@@ -11,9 +11,12 @@ def save_raw(
     source: str,
     url: str,
     page: int | None = 1,
-    payload: str | None = "",
+    payload: dict | list | str | None = None,
 ):
-    """Saves a JSON string to a bucket instance with meta data"""
+    """
+    Saves a response to a bucket instance with meta data.
+    Pass resp.json() for APIs and resp.text for HTML pages.
+    """
     now = datetime.now(UTC)
     path = f"raw/{source}/{now.strftime('%Y-%m-%d')}/{source}_{run_id}_{page}.json"
     body = {
