@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 import requests
 from fastapi import APIRouter
 from uuid6 import uuid7
@@ -5,14 +7,18 @@ from src.database import SessionDep
 from src.enums import PathogenSource
 from src.gcp_service import get_bucket, get_credientials
 from src.models import IllnessMonthly
-from src.utils.bucket_utils import save_raw
-from src.utils.db_utils import save_rows
+from src.utils.pipeline.bucket_utils import save_raw
+from src.utils.pipeline.db_utils import save_rows
 
 router = APIRouter()
 
-SOURCE = "cdc_beam"
+SOURCE = "cdc"
 CDC_URL = "https://data.cdc.gov/resource/jbhn-e8xn.json"
 PAGE_SIZE = 5000
+DATA_DIR = f"{Path(__file__).parent.parent.parent}/data"
+
+with open(f"{DATA_DIR}/state_codes.json", "r") as file:
+    VALID_STATE_CODES = {s["state_code"] for s in json.load(file)}  
 
 
 def fetch_isolates(bucket, run_id: str) -> list[IllnessMonthly]:
@@ -40,8 +46,8 @@ def fetch_isolates(bucket, run_id: str) -> list[IllnessMonthly]:
 
         for r in payload:
             state_code = r["state"]
-            if len(state_code) != 2 or not state_code.isalpha():
-                continue  # skip placeholder codes like "??"
+            if state_code not in VALID_STATE_CODES:
+                continue  # skip non-US codes (e.g. "AB" = Alberta, Canada)
             rows.append(
                 IllnessMonthly(
                     state_code=state_code,
