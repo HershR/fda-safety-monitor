@@ -1,88 +1,78 @@
-import json
-from datetime import date
-
 import requests
 from fastapi import APIRouter
+from sqlmodel import select
+from uuid6 import uuid7
+from src.database import SessionDep
 from src.enums import PathogenSource
 from src.gcp_service import get_bucket, get_credientials
-from src.models import IllnessMonthly
+from src.models import IllnessMonthly, State
+from src.utils.pipeline.bucket_utils import save_raw
+from src.utils.pipeline.db_utils import save_rows
 
 router = APIRouter()
 
-CDC_BASE_URL = "https://data.cdc.gov/resource/jbhn-e8xn.json"
+SOURCE = "cdc"
+CDC_URL = "https://data.cdc.gov/resource/jbhn-e8xn.json"
 PAGE_SIZE = 5000
 
 
-def fetch_illness_monthly() -> list[IllnessMonthly]:
-    """
-    Pull the CDC BEAM Dashboard isolate counts, aggregated server-side
-    (via Socrata's SoQL $select/$group) down to one row per
-    (state, year, month, pathogen, source_type) — the dataset itself has
-    one row per serotype/species, which is finer-grained than
-    IllnessMonthly's primary key, so we ask the API to sum
-    number_of_isolates within each group instead of summing it ourselves
-    after downloading everything.
-
-    Pages through results with $limit/$offset since the raw dataset has
-    ~260k rows (grouped, far fewer, but still enough to paginate safely).
-    """
-    params_base = {
-        "$select": (
-            "state, year, month, pathogen, source_type, "
-            "sum(number_of_isolates) as isolate_count"
-        ),
-        "$group": "state, year, month, pathogen, source_type",
-        "$limit": PAGE_SIZE,
-    }
-
+def fetch_isolates(bucket, run_id, valid_state_codes):
     rows = []
     offset = 0
+    page = 1
+
     while True:
-        resp = requests.get(
-            CDC_BASE_URL,
-            params={**params_base, "$offset": offset},
-            timeout=60,
-        )
+        request_params = {
+            "$select": (
+                "state, year, month, pathogen, source_type, "
+                "sum(number_of_isolates) as isolate_count"
+            ),
+            "$group": "state, year, month, pathogen, source_type",
+            "$limit": PAGE_SIZE,
+            "$offset": offset,
+        }
+
+        resp = requests.get(CDC_URL, params=request_params, timeout=60)
         resp.raise_for_status()
-        page = resp.json()
-        if not page:
+        payload = resp.json()
+        save_raw(bucket, run_id, SOURCE, resp.url, page, payload)
+
+        if not payload:
             break
 
-        for r in page:
+        for r in payload:
             state_code = r["state"]
-            if len(state_code) != 2 or not state_code.isalpha():
-                # A few rows carry placeholder/unknown codes (e.g. "??")
-                # instead of a real 2-letter state. Skip them here; revisit
-                # if we need those isolates counted somewhere during cleaning.
-                continue
-            rows.append(
-                IllnessMonthly(
-                    state_code=state_code,
-                    year_month=f"{int(r['year']):04d}-{int(r['month']):02d}",
-                    pathogen=r["pathogen"],
-                    source_type=PathogenSource(r["source_type"].lower()),
-                    isolate_count=int(r["isolate_count"]),
-                )
-            )
+            if state_code not in valid_state_codes:
+                continue  # skip non-US codes (e.g. "AB" = Alberta, Canada)
 
-        if len(page) < PAGE_SIZE:
+            row = IllnessMonthly(
+                state_code=state_code,
+                year_month=f"{int(r['year']):04d}-{int(r['month']):02d}",
+                pathogen=r["pathogen"],
+                source_type=PathogenSource(r["source_type"].lower()),
+                isolate_count=int(r["isolate_count"]),
+            )
+            rows.append(row)
+
+        if len(payload) < PAGE_SIZE:
             break
-        offset += PAGE_SIZE
+
+        offset = offset + PAGE_SIZE
+        page = page + 1
 
     return rows
 
 
 @router.post("/scrape/")
-def scrape():
-    rows = fetch_illness_monthly()
+def scrape(session: SessionDep):
+    states = session.exec(select(State)).all()
+    valid_state_codes = set()
+    for s in states:
+        valid_state_codes.add(s.state_code)
 
-    credentials = get_credientials()
-    bucket = get_bucket(credentials)
-    today = date.today().isoformat()
-    bucket.blob(
-        f"illness_monthly/{today}_illness_monthly.json"
-    ).upload_from_string(
-        json.dumps([r.model_dump(mode="json") for r in rows]),
-        content_type="application/json",
-    )
-    return {"illness_monthly": len(rows)}
+    bucket = get_bucket(get_credientials())
+    run_id = str(uuid7())
+    rows = fetch_isolates(bucket, run_id, valid_state_codes)
+    saved = save_rows(session, rows)
+    session.commit()
+    return {"illness_monthly": saved}
