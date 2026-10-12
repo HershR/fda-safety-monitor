@@ -38,7 +38,7 @@ def fetch_fda_record(fiscal_year, bucket, run_id):
                     "toptier_code": TOPTIER_CODE,
                     "record": record,
                 }
-                save_raw(bucket, run_id, SOURCE, resp.url, page, fda_data)
+                save_raw(bucket, run_id, SOURCE, resp.url, f"{fiscal_year}_{page}", fda_data,)
                 return record
 
         if not payload["page_metadata"]["hasNext"]:
