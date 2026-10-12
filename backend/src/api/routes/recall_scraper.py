@@ -1,13 +1,15 @@
 import json
-import os
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 
 import requests
 from bs4 import BeautifulSoup
 from fastapi import APIRouter
+from sqlmodel import select
+from src.database import SessionDep
 from src.gcp_service import get_bucket, get_credientials
-from src.models import RecallAnnouncement, RecallEvent, RecallProduct
+from src.models import RecallAnnouncement, RecallEvent, RecallProduct, State
+from src.utils.pipeline.db_utils import save_rows
 
 router = APIRouter()
 
@@ -67,7 +69,7 @@ def scrape_announcements() -> list[RecallAnnouncement]:
     return announcements
 
 
-def fetch_events_and_products() -> tuple[
+def fetch_events_and_products(valid_state_codes) -> tuple[
     list[RecallEvent], list[RecallProduct]
 ]:
     since = date.today() - timedelta(days=365)
@@ -92,14 +94,14 @@ def fetch_events_and_products() -> tuple[
     for event_id, recs in by_event.items():
         r = recs[0]
         if not r.get("recall_initiation_date") or not r.get("report_date"):
-            continue  # these two are still required
+            continue  # these are required
         initiated = d(r["recall_initiation_date"])
         classified = d(r.get("center_classification_date"))
         state = r.get("state", "")
         events.append(
             RecallEvent(
                 event_id=event_id,
-                state_code=state if len(state) == 2 else None,
+                state_code=state if state in valid_state_codes else None,
                 classification=r["classification"],
                 recall_initiation_date=initiated,
                 center_classification_date=classified,
@@ -128,19 +130,23 @@ def fetch_events_and_products() -> tuple[
 
 
 @router.post("/scrape/")
-def scrape():
-    events, products = fetch_events_and_products()
+def scrape(session: SessionDep):
+    valid_state_codes = set(session.exec(select(State.state_code)).all())
+    events, products = fetch_events_and_products(valid_state_codes)
     tables = {
-        "recall_announcement": scrape_announcements(),
         "recall_event": events,
         "recall_product": products,
+        "recall_announcement": scrape_announcements(),
     }
     credentials = get_credientials()
     bucket = get_bucket(credentials)
     now = datetime.now(UTC)
+    saved = {}
     for name, rows in tables.items():
         bucket.blob(f"fda_recalls/{now.strftime('%Y-%m-%d')}_{name}.json").upload_from_string(
             json.dumps([r.model_dump(mode="json") for r in rows]),
             content_type="application/json",
         )
-    return {name: len(rows) for name, rows in tables.items()}
+        saved[name] = save_rows(session, rows)
+    session.commit()
+    return saved
