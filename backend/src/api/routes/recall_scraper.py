@@ -1,7 +1,7 @@
 import json
 import os
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import requests
 from bs4 import BeautifulSoup
@@ -137,8 +137,9 @@ def scrape():
     }
     credentials = get_credientials()
     bucket = get_bucket(credentials)
+    now = datetime.now(UTC)
     for name, rows in tables.items():
-        bucket.blob(f"fda_recalls/{name}.json").upload_from_string(
+        bucket.blob(f"fda_recalls/{now.strftime('%Y-%m-%d')}_{name}.json").upload_from_string(
             json.dumps([r.model_dump(mode="json") for r in rows]),
             content_type="application/json",
         )
