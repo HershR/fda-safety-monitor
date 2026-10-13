@@ -93,18 +93,18 @@ def get_fda_funding(session: SessionDep):
 
 @router.get("/{fiscal_year}", response_model=FDAFunding)
 def get_fda_funding_by_year(session: SessionDep, fiscal_year: int):
-    statement = select(FDAFunding).where(FDAFunding.fiscal_year == fiscal_year)
-    results = session.exec(statement).all()
+    statement = (
+        select(FDAFunding)
+        .where(FDAFunding.fiscal_year == fiscal_year)
+        .order_by(FDAFunding.collected_at.desc())
+    )
 
-    if len(results) == 0:
+    result = session.exec(statement).first()
+
+    if result is None:
         raise HTTPException(
             status_code=404,
             detail=f"No FDA funding data found for fiscal year {fiscal_year}",
         )
 
-    latest = results[0]
-    for row in results:
-        if row.collected_at > latest.collected_at:
-            latest = row
-
-    return latest
+    return result
