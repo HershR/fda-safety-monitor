@@ -6,7 +6,7 @@ from sqlmodel import Session, create_engine
 from src.config import *
 from src.models import *
 
-engine = create_engine(DATABASE_URI, echo=True)
+engine = create_engine(DATABASE_URI, echo=True, pool_pre_ping=True)
 
 
 def create_db_and_tables():
