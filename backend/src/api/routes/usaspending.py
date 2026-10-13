@@ -2,7 +2,8 @@ from datetime import date
 from decimal import Decimal
 
 import requests
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from sqlmodel import select
 from uuid6 import uuid7
 from src.database import SessionDep
 from src.gcp_service import get_bucket, get_credientials
@@ -38,7 +39,14 @@ def fetch_fda_record(fiscal_year, bucket, run_id):
                     "toptier_code": TOPTIER_CODE,
                     "record": record,
                 }
-                save_raw(bucket, run_id, SOURCE, resp.url, f"{fiscal_year}_{page}", fda_data,)
+                save_raw(
+                    bucket,
+                    run_id,
+                    SOURCE,
+                    resp.url,
+                    f"{fiscal_year}_{page}",
+                    fda_data,
+                )
                 return record
 
         if not payload["page_metadata"]["hasNext"]:
@@ -54,7 +62,7 @@ def scrape_funding(bucket, run_id):
     for fiscal_year in range(FIRST_FISCAL_YEAR, today.year + 1):
         record = fetch_fda_record(fiscal_year, bucket, run_id)
         if record is None:
-            continue  # no FDA data for this year yet
+            continue
 
         row = FDAFunding(
             fiscal_year=fiscal_year,
@@ -76,3 +84,27 @@ def scrape(session: SessionDep):
     saved = save_rows(session, rows)
     session.commit()
     return {"fda_funding": saved}
+
+
+@router.get("/", response_model=list[FDAFunding])
+def get_fda_funding(session: SessionDep):
+    return session.exec(select(FDAFunding)).all()
+
+
+@router.get("/{fiscal_year}", response_model=FDAFunding)
+def get_fda_funding_by_year(session: SessionDep, fiscal_year: int):
+    statement = select(FDAFunding).where(FDAFunding.fiscal_year == fiscal_year)
+    results = session.exec(statement).all()
+
+    if len(results) == 0:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No FDA funding data found for fiscal year {fiscal_year}",
+        )
+
+    latest = results[0]
+    for row in results:
+        if row.collected_at > latest.collected_at:
+            latest = row
+
+    return latest

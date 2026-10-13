@@ -1,5 +1,5 @@
 import requests
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from sqlmodel import select
 from uuid6 import uuid7
 from src.database import SessionDep
@@ -76,3 +76,17 @@ def scrape(session: SessionDep):
     saved = save_rows(session, rows)
     session.commit()
     return {"illness_monthly": saved}
+
+
+@router.get("/{state_code}", response_model=list[IllnessMonthly])
+def get_illness_monthly_by_state(session: SessionDep, state_code: str):
+    statement = select(IllnessMonthly).where(IllnessMonthly.state_code == state_code)
+    results = session.exec(statement).all()
+
+    if len(results) == 0:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No illness data found for state {state_code}",
+        )
+
+    return results
