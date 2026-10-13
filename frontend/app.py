@@ -1,34 +1,30 @@
-import json
 import os
 
+import google.auth.transport.requests
 import pandas as pd
+import requests
 import streamlit as st
-from google.cloud import storage
-from google.oauth2 import service_account
+from dotenv import load_dotenv
+from google.oauth2 import id_token
 
-project_id = os.getenv("GCP_PROJECT_ID")
-bucket_name = os.getenv("GCP_BUCKET_NAME")
-service_account_file_path = os.getenv("GCP_SERVICE_ACCOUNT_KEY")
-file_name_prefix = "fda_recalls/"
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
+api_base_url = os.getenv("API_BASE_URL", "http://localhost:8080").rstrip("/")
 
 
-def retrieve_data_from_gcs(
-    service_account_key: str,
-    project_id: str,
-    bucket_name: str,
-    file_name_prefix: str,
-) -> dict:
-    credentials = service_account.Credentials.from_service_account_file(
-        service_account_key
-    )
-    client = storage.Client(project=project_id, credentials=credentials)
-    bucket = client.bucket(bucket_name)
-    tables = {}
-    for blob in bucket.list_blobs(prefix=file_name_prefix):
-        if blob.name.endswith(".json"):
-            table_name = blob.name.split("/")[-1].removesuffix(".json")
-            tables[table_name] = json.loads(blob.download_as_text())
-    return tables
+@st.cache_data(ttl=600)
+def retrieve_data_from_api(api_base_url: str, path: str) -> list:
+    headers = {}
+    if os.getenv("K_SERVICE"):
+        token = id_token.fetch_id_token(
+            google.auth.transport.requests.Request(), api_base_url
+        )
+        headers["Authorization"] = f"Bearer {token}"
+    response = requests.get(f"{api_base_url}{path}", headers=headers, timeout=60)
+    if response.status_code == 404:
+        return []
+    response.raise_for_status()
+    return response.json()
 
 
 def summarize_distribution(df: pd.DataFrame, column_name: str, top_n: int = 10) -> dict:
@@ -37,27 +33,65 @@ def summarize_distribution(df: pd.DataFrame, column_name: str, top_n: int = 10) 
 
 
 if __name__ == "__main__":
-    gcs_data = retrieve_data_from_gcs(
-        service_account_file_path, project_id, bucket_name, file_name_prefix
-    )
-    events = pd.DataFrame(gcs_data.get("recall_event", []))
-    events["report_date"] = pd.to_datetime(events["report_date"])
+    st.title("FDA Food Safety Monitor")
 
-    st.title("FDA Food Recall Monitor")
+    try:
+        states = pd.DataFrame(retrieve_data_from_api(api_base_url, "/states/"))
+        funding = pd.DataFrame(retrieve_data_from_api(api_base_url, "/usaspending/"))
+        events = pd.DataFrame(retrieve_data_from_api(api_base_url, "/fda-recalls/"))
+    except requests.RequestException as e:
+        st.error(
+            f"Could not reach the API at {api_base_url}. Check that the backend "
+            f"is running and that API_BASE_URL in frontend/.env is correct.\n\n{e}"
+        )
+        st.stop()
 
     with st.sidebar:
-        st.write("Filter by Classification")
-        unique_classes = sorted(events["classification"].dropna().unique())
+        state_names = dict(zip(states["state_code"], states["state_name"]))
+        state_codes = sorted(state_names, key=state_names.get)
+        selected_state = st.selectbox(
+            "State for illness data",
+            state_codes,
+            index=state_codes.index("CA") if "CA" in state_codes else 0,
+            format_func=state_names.get,
+        )
+
+        try:
+            illness = pd.DataFrame(
+                retrieve_data_from_api(api_base_url, f"/cdc/{selected_state}")
+            )
+        except requests.RequestException as e:
+            st.error(f"Could not load illness data for {selected_state}.\n\n{e}")
+            illness = pd.DataFrame()
+
+        selected_pathogens = []
+        if not illness.empty:
+            st.write("Filter illness by Pathogen")
+            for pathogen in sorted(illness["pathogen"].dropna().unique()):
+                if st.checkbox(pathogen, value=True, key=f"checkbox_{pathogen}"):
+                    selected_pathogens.append(pathogen)
+
         selected_classes = []
+        if not events.empty:
+            st.write("Filter recalls by Classification")
+            for classification in sorted(events["classification"].dropna().unique()):
+                if st.checkbox(
+                    classification, value=True, key=f"checkbox_{classification}"
+                ):
+                    selected_classes.append(classification)
 
-        for classification in unique_classes:
-            if st.checkbox(
-                classification, value=True, key=f"checkbox_{classification}"
-            ):
-                selected_classes.append(classification)
-
-        filtered_df = events[events["classification"].isin(selected_classes)]
-        filtered_df = filtered_df[
+    st.header("Recalls")
+    if events.empty:
+        st.info(
+            "No recall data from the API yet. The GET /fda-recalls/ endpoint is needed."
+        )
+    else:
+        events["report_date"] = pd.to_datetime(events["report_date"])
+        filtered_events = events[events["classification"].isin(selected_classes)]
+        filtered_events = filtered_events.sort_values(
+            by=["report_date", "recalling_firm"], ascending=[False, True]
+        )
+        table = filtered_events[
             [
                 "report_date",
                 "recalling_firm",
@@ -66,26 +100,66 @@ if __name__ == "__main__":
                 "status",
                 "classification_lag_days",
             ]
+        ].copy()
+        table["report_date"] = table["report_date"].dt.date
+
+        st.metric("Recall events", len(filtered_events))
+        st.dataframe(
+            table,
+            hide_index=True,
+            column_config={
+                "report_date": "Report date",
+                "recalling_firm": "Recalling firm",
+                "state_code": "State",
+                "classification": "Class",
+                "status": "Status",
+                "classification_lag_days": "Days to classify",
+            },
+        )
+
+        st.subheader("Recall events per month")
+        monthly_counts = (
+            filtered_events["report_date"]
+            .dt.strftime("%Y-%m")
+            .value_counts()
+            .sort_index()
+        )
+        st.bar_chart(monthly_counts, x_label="Month", y_label="Recall events")
+
+        st.subheader("States with the most recall events")
+        state_counts = summarize_distribution(filtered_events, "state_code")
+        if state_counts:
+            state_df = pd.DataFrame(
+                {"count": state_counts.values()},
+                index=pd.CategoricalIndex(
+                    state_counts.keys(), categories=state_counts.keys(), ordered=True
+                ),
+            )
+            st.bar_chart(state_df, x_label="State", y_label="Recall events")
+
+    st.header(f"Foodborne illness in {state_names.get(selected_state)}")
+    if illness.empty:
+        st.info(f"No CDC illness data for {state_names.get(selected_state)} yet.")
+    else:
+        human = illness[
+            (illness["source_type"].str.lower() == "human")
+            & illness["pathogen"].isin(selected_pathogens)
         ]
-        filtered_df = filtered_df.drop_duplicates()
-        filtered_df = filtered_df.sort_values(
-            by=["report_date", "recalling_firm"], ascending=[False, True]
+        st.subheader("Human isolates per month")
+        monthly_isolates = human.groupby("year_month")["isolate_count"].sum()
+        st.bar_chart(monthly_isolates, x_label="Month", y_label="Human isolates")
+
+    st.header("FDA funding")
+    if funding.empty:
+        st.info("No USAspending data yet.")
+    else:
+        latest_funding = funding.sort_values("collected_at").drop_duplicates(
+            "fiscal_year", keep="last"
         )
-
-    st.metric("Recall events", len(filtered_df))
-    st.dataframe(filtered_df, hide_index=True)
-
-    st.subheader("Recall events per month")
-    monthly_counts = filtered_df.set_index("report_date").resample("MS").size()
-    st.bar_chart(monthly_counts)
-
-    st.subheader("States with the most recall events")
-    state_counts = summarize_distribution(filtered_df, "state_code")
-    if state_counts:
-        state_df = pd.DataFrame(
-            {"count": state_counts.values()},
-            index=pd.CategoricalIndex(
-                state_counts.keys(), categories=state_counts.keys(), ordered=True
-            ),
+        obligations = latest_funding.set_index(
+            latest_funding["fiscal_year"].astype(str)
+        )["total_obligations"].astype(float)
+        st.subheader("FDA obligations by fiscal year ($ billions)")
+        st.bar_chart(
+            obligations / 1_000_000_000, x_label="Fiscal year", y_label="$ billions"
         )
-        st.bar_chart(state_df)
