@@ -113,15 +113,18 @@ import requests
 requests.post(
     "http://localhost:8080/fda-recalls/scrape/"
 ).json()  # openFDA recalls + FDA announcements
-requests.post(
-    "http://localhost:8080/cdc/scrape/"
-).json()  # CDC BEAM illness counts
-requests.post(
-    "http://localhost:8080/usaspending/scrape/"
-).json()  # FDA spending
+requests.post("http://localhost:8080/cdc/scrape/").json()  # CDC BEAM illness counts
+requests.post("http://localhost:8080/usaspending/scrape/").json()  # FDA spending
 ```
 
 Each response has the number of rows written for each table. See [backend/README.md](backend/README.md) for the full list of routes.
+
+---
+
+## Deployment
+
+See the [GCP deployment guide](documents/gcp-deployment.md) for backend configuration,
+deployment, verification, and rollback instructions.
 
 ---
 
