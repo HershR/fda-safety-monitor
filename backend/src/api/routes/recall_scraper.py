@@ -1,14 +1,16 @@
-import json
 from collections import defaultdict
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime
 
 import requests
 from bs4 import BeautifulSoup
 from fastapi import APIRouter
 from sqlmodel import select
+from uuid6 import uuid7
+from src.config import GCP_SERVICE_ACCOUNT_KEY
 from src.database import SessionDep
 from src.gcp_service import get_bucket, get_credientials
 from src.models import RecallAnnouncement, RecallEvent, RecallProduct, State
+from src.utils.pipeline.bucket_utils import save_raw
 from src.utils.pipeline.db_utils import save_rows
 
 router = APIRouter()
@@ -16,6 +18,12 @@ router = APIRouter()
 FDA = "https://www.fda.gov"
 PAGE = "/safety/recalls-market-withdrawals-safety-alerts"
 OPENFDA = "https://api.fda.gov/food/enforcement.json"
+OPENFDA_SOURCE = "openfda"
+ANNOUNCEMENT_SOURCE = "fda_announcements"
+OPENFDA_FIRST_YEAR = 2012
+OPENFDA_PAGE_SIZE = 1000  # openFDA max rows per request
+OPENFDA_MAX_SKIP = 25000  # openFDA won't page past this
+ANNOUNCEMENT_PAGE_SIZE = 5000
 
 
 def text(cell) -> str:
@@ -24,14 +32,13 @@ def text(cell) -> str:
     )
 
 
-def scrape_announcements() -> list[RecallAnnouncement]:
-    # json endpoint
+def scrape_announcements(bucket, run_id) -> list[RecallAnnouncement]:    # json endpoint
     params = {
         "view_name": "recall_solr_index",
         "view_display_id": "recall_datatable_block_1",
         "view_path": PAGE,
         "start": 0,
-        "length": 5000,
+        "length": ANNOUNCEMENT_PAGE_SIZE,
     }
     resp = requests.get(
         f"{FDA}/datatables/views/ajax",
@@ -43,14 +50,20 @@ def scrape_announcements() -> list[RecallAnnouncement]:
         },
     )
     resp.raise_for_status()
+    payload = resp.json()
+    save_raw(bucket, run_id, ANNOUNCEMENT_SOURCE, resp.url, 1, payload)
+    if len(payload["data"]) >= ANNOUNCEMENT_PAGE_SIZE:
+        raise RuntimeError("FDA announcement list may be truncated")
 
     announcements = []
-    for row in resp.json()["data"]:
+    for row in payload["data"]:
         date_cell, brand, product, category, reason, company = row[:6]
         if "Food & Beverages" not in text(category):
             continue
         link = BeautifulSoup(str(brand), "html.parser").find("a")
-        url = FDA + link["href"] if link else ""
+        if not link:
+            continue  # announcement_id comes from the link
+        url = FDA + link["href"]
         announcements.append(
             RecallAnnouncement(
                 announcement_id=url.rstrip("/").rsplit("/", 1)[-1],
@@ -68,26 +81,46 @@ def scrape_announcements() -> list[RecallAnnouncement]:
         )
     return announcements
 
+def fetch_openfda_records(bucket, run_id) -> list[dict]:
+    records = []
+    for year in range(OPENFDA_FIRST_YEAR, date.today().year + 1):
+        skip = 0
+        page = 1
+        while skip <= OPENFDA_MAX_SKIP:
+            resp = requests.get(
+                OPENFDA,
+                timeout=60,
+                params={
+                    "search": f"report_date:[{year}0101 TO {year}1231]",
+                    "limit": OPENFDA_PAGE_SIZE,
+                    "skip": skip,
+                },
+            )
+            if resp.status_code == 404:
+                break  # openFDA returns 404 when nothing matches
+            resp.raise_for_status()
+            payload = resp.json()
+            save_raw(
+                bucket, run_id, OPENFDA_SOURCE, resp.url, f"{year}_{page}", payload
+            )
 
-def fetch_events_and_products(valid_state_codes) -> tuple[
-    list[RecallEvent], list[RecallProduct]
-]:
-    since = date.today() - timedelta(days=365)
-    resp = requests.get(
-        OPENFDA,
-        timeout=60,
-        params={
-            "search": f"report_date:[{since:%Y%m%d} TO {date.today():%Y%m%d}]",
-            "limit": 1000,
-        },
-    )
-    resp.raise_for_status()
+            results = payload.get("results", [])
+            records.extend(results)
+            if len(results) < OPENFDA_PAGE_SIZE:
+                break
+            skip = skip + OPENFDA_PAGE_SIZE
+            page = page + 1
+    return records
+
+def build_events_and_products(records, valid_state_codes) -> tuple[
+        list[RecallEvent], list[RecallProduct]
+        ]:
 
     def d(s: str) -> date:
         return datetime.strptime(s, "%Y%m%d").date() if s else None
 
     by_event = defaultdict(list)
-    for r in resp.json()["results"]:
+    for r in records:
         by_event[r["event_id"]].append(r)
 
     events, products = [], []
@@ -131,22 +164,22 @@ def fetch_events_and_products(valid_state_codes) -> tuple[
 
 @router.post("/scrape/")
 def scrape(session: SessionDep):
+    run_id = str(uuid7())
+    bucket = get_bucket(get_credientials() if GCP_SERVICE_ACCOUNT_KEY else None)
     valid_state_codes = set(session.exec(select(State.state_code)).all())
-    events, products = fetch_events_and_products(valid_state_codes)
-    tables = {
-        "recall_event": events,
-        "recall_product": products,
-        "recall_announcement": scrape_announcements(),
+
+    # 1. fetch: every response is saved raw
+    records = fetch_openfda_records(bucket, run_id)
+    announcements = scrape_announcements(bucket, run_id)
+
+    # 2. clean
+    events, products = build_events_and_products(records, valid_state_codes)
+
+    # 3. save: events first, since products and announcements reference them
+    saved = {
+        "recall_event": save_rows(session, events),
+        "recall_product": save_rows(session, products),
+        "recall_announcement": save_rows(session, announcements),
     }
-    credentials = get_credientials()
-    bucket = get_bucket(credentials)
-    now = datetime.now(UTC)
-    saved = {}
-    for name, rows in tables.items():
-        bucket.blob(f"fda_recalls/{now.strftime('%Y-%m-%d')}_{name}.json").upload_from_string(
-            json.dumps([r.model_dump(mode="json") for r in rows]),
-            content_type="application/json",
-        )
-        saved[name] = save_rows(session, rows)
     session.commit()
-    return saved
+    return {"run_id": run_id, **saved}
