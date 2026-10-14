@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$ROOT_DIR/deploy.local.sh" ]]; then
+  source "$ROOT_DIR/deploy.local.sh"
+fi
+
 PROJECT_ID="${GCP_PROJECT_ID:-YOUR_PROJECT_ID}"
 REGION="${GCP_REGION:-YOUR_REGION}"
 API_SERVICE="${GCP_API_SERVICE:-YOUR_API_SERVICE}"
@@ -13,11 +18,11 @@ DB_USER="${GCP_DB_USER:-postgres}"
 PASSWORD_SECRET="${GCP_DB_PASSWORD_SECRET:-YOUR_PASSWORD_SECRET}"
 SECRET_VERSION="${GCP_DB_SECRET_VERSION:-YOUR_SECRET_VERSION}"
 IMAGE_REPOSITORY="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/backend"
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   cat <<'HELP'
 Usage: bash gcloud_command.sh COMMAND [ARGUMENT]
+  deploy          Build in Google Cloud and update the existing private backend.
   build TAG       Build the backend image locally.
   push TAG        Upload the image to Artifact Registry.
   api IMAGE       Deploy a full image reference to the private API service.
@@ -54,7 +59,15 @@ deploy_api() {
     --no-allow-unauthenticated
 }
 
-case "${1:-help}" in
+case "${1:-deploy}" in
+  deploy)
+    require_config "$PROJECT_ID" "$REGION" "$API_SERVICE"
+    gcloud run services describe "$API_SERVICE" \
+      --project="$PROJECT_ID" --region="$REGION" --format='value(metadata.name)' >/dev/null
+    gcloud run deploy "$API_SERVICE" \
+      --project="$PROJECT_ID" --region="$REGION" \
+      --source="$ROOT_DIR/backend" --no-allow-unauthenticated
+    ;;
   build)
     require_config "$PROJECT_ID" "$REGION" "$REPOSITORY"
     tag="${2:?Provide a new image tag}"

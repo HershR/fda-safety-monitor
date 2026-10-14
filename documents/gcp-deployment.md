@@ -8,6 +8,42 @@ The script uses existing GCP resources. Resource creation, frontend deployment,
 and Cloud Scheduler configuration are outside its scope. For local development,
 see the [backend README](../backend/README.md).
 
+## Update the backend
+
+Create `deploy.local.sh` in the project root:
+
+```bash
+export GCP_PROJECT_ID="YOUR_PROJECT_ID"
+export GCP_REGION="YOUR_REGION"
+export GCP_API_SERVICE="YOUR_API_SERVICE"
+```
+
+Use the values from the team. This file is ignored by Git.
+
+Run:
+
+```bash
+bash gcloud_command.sh
+```
+
+Google Cloud builds the image and updates the existing backend. The database
+settings and secrets stay the same. You need permission to deploy and use Cloud
+Build. This command has not been tested end to end yet.
+
+The backend is private. Each team member needs Cloud Run Invoker access.
+To test it:
+
+```bash
+gcloud auth login
+API_URL=$(bash gcloud_command.sh urls)
+curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" "$API_URL/states/"
+```
+
+Opening the URL directly in a browser can return Forbidden because the browser
+does not send the token. Frontend and Scheduler access still need to be set up.
+
+The steps below are for deploying an image manually.
+
 ## Prerequisites
 
 - Docker and the Google Cloud CLI, authenticated with an account that can upload
@@ -72,8 +108,8 @@ bash gcloud_command.sh urls
 bash gcloud_command.sh revisions
 ```
 
-- Confirm that an unauthenticated request is rejected and an authenticated
-  request to `GET /states/` returns HTTP 200.
+- Confirm that unauthenticated requests are rejected and authenticated requests
+  to `/docs` and `GET /states/` return HTTP 200.
 - To verify data collection, call `POST /usaspending/scrape/` with authentication
   and check the resulting Cloud Storage files and database records. This call
   writes data; its response counts processed records, not necessarily new rows.
