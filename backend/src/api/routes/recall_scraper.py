@@ -183,3 +183,9 @@ def scrape(session: SessionDep):
     }
     session.commit()
     return {"run_id": run_id, **saved}
+
+
+@router.get("/", response_model=list[RecallEvent])
+def get_recall_events(session: SessionDep):
+    statement = select(RecallEvent).order_by(RecallEvent.report_date.desc())
+    return session.exec(statement).all()
