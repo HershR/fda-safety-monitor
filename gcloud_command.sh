@@ -1,103 +1,151 @@
 #!/usr/bin/env bash
+#
+# gcloud_command.sh — deploy this project on GCP (backend only for now).
+#
+#   ./gcloud_command.sh all        # everything, in order (first-time setup)
+#   ./gcloud_command.sh bootstrap  # enable APIs and grant backend permissions
+#   ./gcloud_command.sh api        # redeploy the API only
+#   ./gcloud_command.sh urls       # print the deployed URLs
+#
+# This deploys straight from source with `gcloud run deploy --source`, the
+# same way HW3 did.
+#
+# TODO(team): change every value in the CONFIG block, then delete this line.
+# Also, make any necessary updates. - Your data should be regularly collected by the scheduler.
+
 set -euo pipefail
 
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$ROOT_DIR/deploy.local.sh" ]]; then
-  source "$ROOT_DIR/deploy.local.sh"
+# Resolve paths from this script and optionally load the team's local settings.
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+if [ -f deploy.local.sh ]; then
+  source deploy.local.sh
 fi
 
-PROJECT_ID="${GCP_PROJECT_ID:-YOUR_PROJECT_ID}"
-REGION="${GCP_REGION:-YOUR_REGION}"
-API_SERVICE="${GCP_API_SERVICE:-YOUR_API_SERVICE}"
-REPOSITORY="${GCP_REPOSITORY:-YOUR_REPOSITORY}"
-SERVICE_ACCOUNT="${GCP_BACKEND_SERVICE_ACCOUNT:-YOUR_SERVICE_ACCOUNT_EMAIL}"
-SQL_INSTANCE="${GCP_SQL_INSTANCE:-YOUR_PROJECT:YOUR_SQL_REGION:YOUR_INSTANCE}"
-BUCKET="${GCP_BUCKET_NAME:-YOUR_BUCKET}"
-DATABASE="${GCP_DB_NAME:-YOUR_DATABASE}"
+# ─── CONFIG : UPDATE THIS : ADD COMMENTS TO FILL IN. ──────────────────────────────────────────────────────────────────
+PROJECT_ID="${GCP_PROJECT_ID:-your-gcp-project-id}"
+REGION="${GCP_REGION:-}"         # keep the same region everywhere
+
+API_SERVICE="${GCP_API_SERVICE:-}" # Cloud Run service name for the API
+API_DIR="./backend"                     # folder holding the API Dockerfile
+API_PORT=8080                           # must match EXPOSE/CMD in backend/Dockerfile
+
+# Our backend uses Cloud SQL and a runtime service account instead of a JSON key.
+# Create the account, SQL instance/database/user, bucket, and password secret first.
+# A Cloud SQL instance with only a private IP also needs network configuration.
+SERVICE_ACCOUNT="${GCP_BACKEND_SERVICE_ACCOUNT:-}"
+SQL_INSTANCE="${GCP_SQL_INSTANCE:-}"      # PROJECT:REGION:INSTANCE
+BUCKET="${GCP_BUCKET_NAME:-}"
+DATABASE="${GCP_DB_NAME:-}"
 DB_USER="${GCP_DB_USER:-postgres}"
-PASSWORD_SECRET="${GCP_DB_PASSWORD_SECRET:-YOUR_PASSWORD_SECRET}"
-SECRET_VERSION="${GCP_DB_SECRET_VERSION:-YOUR_SECRET_VERSION}"
-IMAGE_REPOSITORY="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/backend"
+PASSWORD_SECRET="${GCP_DB_PASSWORD_SECRET:-}" # Secret Manager name, not the password
+SECRET_VERSION="${GCP_DB_SECRET_VERSION:-}"  # Version containing that user's password
+# ─────────────────────────────────────────────────────────────────────────────
 
-usage() {
-  cat <<'HELP'
-Usage: bash gcloud_command.sh COMMAND [ARGUMENT]
-  deploy          Build in Google Cloud and update the existing private backend.
-  build TAG       Build the backend image locally.
-  push TAG        Upload the image to Artifact Registry.
-  api IMAGE       Deploy a full image reference to the private API service.
-  urls            Print the API URL.
-  revisions       List API revisions.
-  rollback NAME   Route traffic to a previously tested ready revision.
-  help            Show this help.
+# ─── validation ──────────────────────────────────────────────────────────────
+for _var in PROJECT_ID REGION API_SERVICE API_DIR API_PORT \
+            SERVICE_ACCOUNT SQL_INSTANCE BUCKET DATABASE DB_USER \
+            PASSWORD_SECRET SECRET_VERSION; do
+  if [[ -z "${!_var}" || "${!_var}" == YOUR_* ]]; then
+    echo "ERROR: $_var is empty or still a placeholder -- fill in the CONFIG block at the top of" \
+         "this script before running it." >&2
+    exit 1
+  fi
+done
+unset _var
 
-Set the GCP variables listed in documents/gcp-deployment.md before use.
-The script reuses existing resources. Web and Scheduler are not included yet.
-HELP
+if [ "$PROJECT_ID" = "your-gcp-project-id" ]; then
+  echo "ERROR: PROJECT_ID is still the placeholder. Edit the CONFIG block." >&2
+  exit 1
+fi
+for _dir in "$API_DIR"; do
+  if [ ! -f "$_dir/Dockerfile" ]; then
+    echo "ERROR: no Dockerfile in '$_dir'." >&2
+    exit 1
+  fi
+done
+unset _dir
+
+log() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
+
+# ─── one-time project setup ──────────────────────────────────────────────────
+bootstrap() {
+  gcloud services enable --project="$PROJECT_ID" \
+    run.googleapis.com \
+    cloudbuild.googleapis.com \
+    artifactregistry.googleapis.com \
+    sqladmin.googleapis.com \
+    secretmanager.googleapis.com \
+    storage.googleapis.com
+
+  log "Letting the Cloud Run runtime service account access Cloud SQL and Storage"
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:$SERVICE_ACCOUNT" \
+    --role=roles/cloudsql.client --condition=None
+  gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
+    --project="$PROJECT_ID" \
+    --member="serviceAccount:$SERVICE_ACCOUNT" \
+    --role=roles/storage.objectUser
+
+  log "Letting the Cloud Run runtime service account read the database password"
+  gcloud secrets add-iam-policy-binding "$PASSWORD_SECRET" \
+    --project="$PROJECT_ID" \
+    --member="serviceAccount:$SERVICE_ACCOUNT" \
+    --role=roles/secretmanager.secretAccessor
 }
 
-require_config() {
-  for value in "$@"; do
-    if [[ -z "$value" || "$value" == YOUR_* ]]; then
-      echo "Set the required GCP variables before running this command." >&2
-      exit 1
-    fi
-  done
-}
-
+# ─── API service ─────────────────────────────────────────────────────────────
 deploy_api() {
-  require_config "$PROJECT_ID" "$REGION" "$API_SERVICE" "$SERVICE_ACCOUNT" \
-    "$SQL_INSTANCE" "$BUCKET" "$DATABASE" "$DB_USER" "$PASSWORD_SECRET" "$SECRET_VERSION"
+  log "Deploying ${API_SERVICE} from ${API_DIR} (Cloud Build builds the image)"
   gcloud run deploy "$API_SERVICE" \
-    --project="$PROJECT_ID" --region="$REGION" --platform=managed \
-    --image="$1" --service-account="$SERVICE_ACCOUNT" \
-    --execution-environment=gen2 --set-cloudsql-instances="$SQL_INSTANCE" \
+    --source "$API_DIR" \
+    --project="$PROJECT_ID" \
+    --region "$REGION" \
+    --port="$API_PORT" \
+    --no-allow-unauthenticated \
+    --timeout=300 \
+    --max-instances=1 \
+    --service-account="$SERVICE_ACCOUNT" \
+    --execution-environment=gen2 \
+    --set-cloudsql-instances="$SQL_INSTANCE" \
     --set-env-vars="DB_HOST=/cloudsql/${SQL_INSTANCE},DB_PORT=5432,DB_USER=${DB_USER},DB_NAME=${DATABASE},GCP_PROJECT_ID=${PROJECT_ID},GCP_BUCKET_NAME=${BUCKET}" \
     --set-secrets="DB_PASSWORD=${PASSWORD_SECRET}:${SECRET_VERSION}" \
-    --port=8080 --cpu=1 --memory=512Mi \
-    --min-instances=0 --max-instances=1 --concurrency=8 --timeout=300 \
-    --no-allow-unauthenticated
+    --cpu=1 --memory=512Mi --min-instances=0 --concurrency=8
 }
 
-case "${1:-deploy}" in
-  deploy)
-    require_config "$PROJECT_ID" "$REGION" "$API_SERVICE"
-    gcloud run services describe "$API_SERVICE" \
-      --project="$PROJECT_ID" --region="$REGION" --format='value(metadata.name)' >/dev/null
-    gcloud run deploy "$API_SERVICE" \
-      --project="$PROJECT_ID" --region="$REGION" \
-      --source="$ROOT_DIR/backend" --no-allow-unauthenticated
-    ;;
-  build)
-    require_config "$PROJECT_ID" "$REGION" "$REPOSITORY"
-    tag="${2:?Provide a new image tag}"
-    docker build --platform linux/amd64 \
-      -t "${IMAGE_REPOSITORY}:${tag}" "$ROOT_DIR/backend"
-    ;;
-  push)
-    require_config "$PROJECT_ID" "$REGION" "$REPOSITORY"
-    tag="${2:?Provide the image tag to upload}"
-    docker push "${IMAGE_REPOSITORY}:${tag}"
-    ;;
-  api)
-    deploy_api "${2:?Provide the full image reference to deploy}"
-    ;;
-  urls)
-    require_config "$PROJECT_ID" "$REGION" "$API_SERVICE"
-    gcloud run services describe "$API_SERVICE" \
-      --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)'
-    ;;
-  revisions)
-    require_config "$PROJECT_ID" "$REGION" "$API_SERVICE"
-    gcloud run revisions list --service="$API_SERVICE" \
-      --project="$PROJECT_ID" --region="$REGION"
-    ;;
-  rollback)
-    require_config "$PROJECT_ID" "$REGION" "$API_SERVICE"
-    revision="${2:?Provide a previously tested ready revision}"
-    gcloud run services update-traffic "$API_SERVICE" \
-      --project="$PROJECT_ID" --region="$REGION" --to-revisions="${revision}=100"
-    ;;
-  help|--help|-h) usage ;;
-  *) usage >&2; exit 1 ;;
+api_url() {
+  local url
+  url=$(gcloud run services describe "$API_SERVICE" \
+    --project="$PROJECT_ID" --region "$REGION" --format="value(urls[0])")
+  if [ -z "$url" ]; then
+    url=$(gcloud run services describe "$API_SERVICE" \
+      --project="$PROJECT_ID" --region "$REGION" --format="value(status.url)")
+  fi
+  if [ -z "$url" ]; then
+    echo "ERROR: could not resolve the URL for Cloud Run service" \
+         "'$API_SERVICE' in $REGION. Deploy it first." >&2
+    exit 1
+  fi
+  echo "$url"
+}
+
+# ─── Web app ─────────────────────────────────────────────────────────────────
+# TODO(team): add deploy_web when the frontend is ready.
+
+# ─── Cloud Scheduler ─────────────────────────────────────────────────────────
+# TODO(team): add authenticated collection jobs in the next update.
+
+show_urls() {
+  local url; url="$(api_url)"
+  echo "API     : $url"
+}
+
+# ─── entry point ─────────────────────────────────────────────────────────────
+case "${1:-all}" in
+  all)       bootstrap; deploy_api; show_urls ;;
+  bootstrap) bootstrap ;;
+  api|deploy) deploy_api ;;
+  urls)      show_urls ;;
+  *) echo "usage: $0 {all|bootstrap|api|deploy|urls}" >&2; exit 1 ;;
 esac
+
+log "Done."
