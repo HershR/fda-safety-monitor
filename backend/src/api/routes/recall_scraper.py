@@ -171,6 +171,14 @@ def build_events_and_products(records, valid_state_codes) -> tuple[
 
 @router.post("/scrape/")
 def scrape(session: SessionDep):
+    """Scrape FDA food recalls from openFDA and FDA announcements page.
+
+    Returns:
+        one RecallAnnouncement per food announcement
+    Raises:
+        requests.HTTPError: If fda.gov returns an error
+        
+    """
     run_id = str(uuid7())
     bucket = get_bucket(get_credientials() if GCP_SERVICE_ACCOUNT_KEY else None)
     valid_state_codes = set(session.exec(select(State.state_code)).all())
