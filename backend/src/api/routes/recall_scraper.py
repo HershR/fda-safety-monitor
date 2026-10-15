@@ -3,7 +3,7 @@ from datetime import date, datetime
 
 import requests
 from bs4 import BeautifulSoup
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from sqlmodel import select
 from uuid6 import uuid7
 from src.config import GCP_SERVICE_ACCOUNT_KEY
@@ -32,7 +32,7 @@ def text(cell) -> str:
     )
 
 
-def scrape_announcements(bucket, run_id) -> list[RecallAnnouncement]:    # json endpoint
+def scrape_announcements(bucket, run_id) -> list[RecallAnnouncement]:
     params = {
         "view_name": "recall_solr_index",
         "view_display_id": "recall_datatable_block_1",
@@ -49,6 +49,11 @@ def scrape_announcements(bucket, run_id) -> list[RecallAnnouncement]:    # json 
             "X-Requested-With": "XMLHttpRequest",
         },
     )
+    if not resp.ok:
+        print(
+            f"FDA announcements {resp.status_code}: "
+            f"server={resp.headers.get('Server')} body={resp.text[:300]}"
+        )
     resp.raise_for_status()
     payload = resp.json()
     save_raw(bucket, run_id, ANNOUNCEMENT_SOURCE, resp.url, 1, payload)
@@ -81,6 +86,7 @@ def scrape_announcements(bucket, run_id) -> list[RecallAnnouncement]:    # json 
         )
     return announcements
 
+
 def fetch_openfda_records(bucket, run_id) -> list[dict]:
     records = []
     for year in range(OPENFDA_FIRST_YEAR, date.today().year + 1):
@@ -111,6 +117,7 @@ def fetch_openfda_records(bucket, run_id) -> list[dict]:
             skip = skip + OPENFDA_PAGE_SIZE
             page = page + 1
     return records
+
 
 def build_events_and_products(records, valid_state_codes) -> tuple[
         list[RecallEvent], list[RecallProduct]
@@ -168,20 +175,26 @@ def scrape(session: SessionDep):
     bucket = get_bucket(get_credientials() if GCP_SERVICE_ACCOUNT_KEY else None)
     valid_state_codes = set(session.exec(select(State.state_code)).all())
 
-    # 1. fetch: every response is saved raw
+    # openFDA
     records = fetch_openfda_records(bucket, run_id)
-    announcements = scrape_announcements(bucket, run_id)
-
-    # 2. clean
     events, products = build_events_and_products(records, valid_state_codes)
-
-    # 3. save: events first, since products and announcements reference them
     saved = {
         "recall_event": save_rows(session, events),
         "recall_product": save_rows(session, products),
-        "recall_announcement": save_rows(session, announcements),
     }
-    session.commit()
+    session.commit()  # kept even if announcements fail below
+
+    # FDA announcements
+    try:
+        announcements = scrape_announcements(bucket, run_id)
+        saved["recall_announcement"] = save_rows(session, announcements)
+        session.commit()
+    except (requests.RequestException, RuntimeError) as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"openFDA saved {saved}; FDA announcements failed: {e}",
+        )
+    
     return {"run_id": run_id, **saved}
 
 
