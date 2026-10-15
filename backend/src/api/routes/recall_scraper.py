@@ -187,11 +187,12 @@ def scrape(session: SessionDep):
     # FDA announcements
     try:
         announcements = scrape_announcements(bucket, run_id)
+        saved["recall_announcement"] = save_rows(session, announcements)
+        session.commit()
     except (requests.RequestException, RuntimeError) as e:
         raise HTTPException(
             status_code=502,
             detail=f"openFDA saved {saved}; FDA announcements failed: {e}",
         )
-    saved["recall_announcement"] = save_rows(session, announcements)
-    session.commit()
+    
     return {"run_id": run_id, **saved}
