@@ -124,7 +124,7 @@ The dashboard reads data from the API, so keep the backend from step 4 running a
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate        
 pip install -r frontend/requirements.txt
 cp frontend/.env.template frontend/.env
 streamlit run frontend/app.py
