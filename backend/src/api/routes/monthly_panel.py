@@ -3,8 +3,9 @@ from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
 from statistics import median
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import Session, func, select
 from src.database import SessionDep
 from src.enums import PathogenSource
@@ -144,15 +145,44 @@ def rebuild_panel(session: Session) -> int:
 
 
 @router.get("/", response_model=list[MonthlyPanel])
-def get_monthly_panels(session: SessionDep):
-    return session.exec(select(MonthlyPanel)).all()
+def get_monthly_panels(
+    session: SessionDep,
+    states: Annotated[list[str] | None, Query()] = None,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    fiscal_year: int | None = None,
+):
+    statement = select(MonthlyPanel)
+    if states:
+        statement = statement.where(MonthlyPanel.state_code.in_(states))
+    if start_year:
+        statement = statement.where(
+            MonthlyPanel.year_month >= f"{start_year}-01"
+        )
+    if end_year:
+        statement = statement.where(
+            MonthlyPanel.year_month <= f"{end_year}-12"
+        )
+    if fiscal_year:
+        statement = statement.where(MonthlyPanel.fiscal_year == fiscal_year)
+    statement = statement.order_by(
+        MonthlyPanel.year_month, MonthlyPanel.state_code
+    )
+    return session.exec(statement).all()
 
 
 @router.get("/{year_month}", response_model=list[MonthlyPanel])
-def get_monthly_panel(session: SessionDep, year_month: str):
+def get_monthly_panel(
+    session: SessionDep,
+    year_month: str,
+    states: Annotated[list[str] | None, Query()] = None,
+):
     statement = select(MonthlyPanel).where(
         MonthlyPanel.year_month == year_month
     )
+    if states:
+        statement = statement.where(MonthlyPanel.state_code.in_(states))
+    statement = statement.order_by(MonthlyPanel.state_code)
     results = session.exec(statement).all()
     if not results:
         raise HTTPException(
