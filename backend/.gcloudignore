@@ -1,0 +1,11 @@
+*
+!Dockerfile
+!requirements.txt
+!src/
+!src/**
+!data/
+!data/**
+**/__pycache__/
+**/*.pyc
+**/.env
+**/.env.*
