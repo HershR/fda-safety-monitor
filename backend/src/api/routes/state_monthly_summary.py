@@ -24,16 +24,28 @@ FIRST_YEAR = 2012
 
 
 def month_range(year_month: str) -> tuple[date, date]:
-    """Returns (first day of month, first day of next month)"""
-    year, month = map(int, year_month.split("-"))
+    """Get the first day of the selected month and first day of next month"""
+    year_month_split = year_month.split("-")
+    if len(year_month_split) != 2:
+        raise ValueError("Provided year_month is invalid format: ", year_month)
+    year, month = int(year_month_split[0]), int(year_month_split[1])
+
     start = date(year, month, 1)
-    end = date(year + month // 12, month % 12 + 1, 1)
+    if month == 12:
+        end_year = year + 1
+        end_month = 1
+    else:
+        end_year = 1
+        end_month = month + 1
+    end = date(end_year, end_month, 1)
     return start, end
 
 
 def all_months(last_day: date) -> list[str]:
-    """YYYY-MM strings from FIRST_YEAR to last_day"""
-    months, year, month = [], FIRST_YEAR, 1
+    """Get all YYYY-MM strings from FIRST_YEAR to last_day"""
+    months = []
+    year = FIRST_YEAR
+    month = 1
     while (year, month) <= (last_day.year, last_day.month):
         months.append(f"{year:04d}-{month:02d}")
         year, month = year + month // 12, month % 12 + 1
@@ -56,7 +68,7 @@ def build_month(
     events: Sequence[RecallEvent],
     illness: Sequence[IllnessMonthly],
 ) -> list[StateMonthlySummary]:
-    """One row per state for the given month"""
+    """Create a monthly summary for the givent states for the given month"""
     events_by_state: dict[str | None, list[RecallEvent]] = defaultdict(list)
     for e in events:
         events_by_state[e.state_code].append(e)
@@ -134,7 +146,7 @@ def rebuild_month(
 def rebuild_months(session: Session, months: list[str]) -> int:
     """
     Rebuilds the given YYYY-MM months, skipping months after the latest recall.
-    Does not delete old rows, existing rows are overwritten.
+    Does not delete old rows, existing rows are updated.
     """
     last_report = session.exec(select(func.max(RecallEvent.report_date))).one()
     if last_report is None:
@@ -196,7 +208,7 @@ def get_state_monthly_summary(
     year_month: str,
     states: Annotated[list[str] | None, Query()] = None,
 ):
-    """Summary rows for one YYYY-MM month, optionally filtered by states"""
+    """Get the State Monthly Summary for one month(YYYY-mm), optionally filtered by states"""
     statement = select(StateMonthlySummary).where(
         StateMonthlySummary.year_month == year_month
     )
