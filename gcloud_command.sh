@@ -1,47 +1,35 @@
 #!/usr/bin/env bash
-#
-# gcloud_command.sh — deploy this project on GCP (backend only for now).
-#
-#   ./gcloud_command.sh all        # everything, in order (first-time setup)
-#   ./gcloud_command.sh bootstrap  # enable APIs and grant backend permissions
-#   ./gcloud_command.sh api        # redeploy the API only
-#   ./gcloud_command.sh urls       # print the deployed URLs
-#
-# This deploys straight from source with `gcloud run deploy --source`, the
-# same way HW3 did.
-#
-# TODO(team): change every value in the CONFIG block, then delete this line.
-# Also, make any necessary updates. - Your data should be regularly collected by the scheduler.
 
 set -euo pipefail
 
-# Resolve paths from this script and optionally load the team's local settings.
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 if [ -f deploy.local.sh ]; then
   source deploy.local.sh
 fi
 
-# ─── CONFIG : UPDATE THIS : ADD COMMENTS TO FILL IN. ──────────────────────────────────────────────────────────────────
 PROJECT_ID="${GCP_PROJECT_ID:-your-gcp-project-id}"
-REGION="${GCP_REGION:-}"         # keep the same region everywhere
+REGION="${GCP_REGION:-}"
 
-API_SERVICE="${GCP_API_SERVICE:-}" # Cloud Run service name for the API
-API_DIR="./backend"                     # folder holding the API Dockerfile
-API_PORT=8080                           # must match EXPOSE/CMD in backend/Dockerfile
+API_SERVICE="${GCP_API_SERVICE:-}"
+API_DIR="./backend"
+API_PORT=8080
 
-# Our backend uses Cloud SQL and a runtime service account instead of a JSON key.
-# Create the account, SQL instance/database/user, bucket, and password secret first.
-# A Cloud SQL instance with only a private IP also needs network configuration.
+WEB_SERVICE="${GCP_WEB_SERVICE:-fda-monitor-web}"
+WEB_DIR="./frontend"
+WEB_PORT=8501
+WEB_ACCOUNT="fda-monitor-frontend@${PROJECT_ID}.iam.gserviceaccount.com"
+SCHEDULER_ACCOUNT="fda-monitor-scheduler@${PROJECT_ID}.iam.gserviceaccount.com"
+SCHEDULER_TZ="Etc/UTC"
+MESSAGE_BODY='{}'
+
 SERVICE_ACCOUNT="${GCP_BACKEND_SERVICE_ACCOUNT:-}"
-SQL_INSTANCE="${GCP_SQL_INSTANCE:-}"      # PROJECT:REGION:INSTANCE
+SQL_INSTANCE="${GCP_SQL_INSTANCE:-}"
 BUCKET="${GCP_BUCKET_NAME:-}"
 DATABASE="${GCP_DB_NAME:-}"
 DB_USER="${GCP_DB_USER:-postgres}"
-PASSWORD_SECRET="${GCP_DB_PASSWORD_SECRET:-}" # Secret Manager name, not the password
-SECRET_VERSION="${GCP_DB_SECRET_VERSION:-}"  # Version containing that user's password
-# ─────────────────────────────────────────────────────────────────────────────
+PASSWORD_SECRET="${GCP_DB_PASSWORD_SECRET:-}"
+SECRET_VERSION="${GCP_DB_SECRET_VERSION:-}"
 
-# ─── validation ──────────────────────────────────────────────────────────────
 for _var in PROJECT_ID REGION API_SERVICE API_DIR API_PORT \
             SERVICE_ACCOUNT SQL_INSTANCE BUCKET DATABASE DB_USER \
             PASSWORD_SECRET SECRET_VERSION; do
@@ -67,7 +55,6 @@ unset _dir
 
 log() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 
-# ─── one-time project setup ──────────────────────────────────────────────────
 bootstrap() {
   gcloud services enable --project="$PROJECT_ID" \
     run.googleapis.com \
@@ -93,7 +80,6 @@ bootstrap() {
     --role=roles/secretmanager.secretAccessor
 }
 
-# ─── API service ─────────────────────────────────────────────────────────────
 deploy_api() {
   log "Deploying ${API_SERVICE} from ${API_DIR} (Cloud Build builds the image)"
   gcloud run deploy "$API_SERVICE" \
@@ -102,7 +88,7 @@ deploy_api() {
     --region "$REGION" \
     --port="$API_PORT" \
     --no-allow-unauthenticated \
-    --timeout=300 \
+    --timeout=1500 \
     --max-instances=1 \
     --service-account="$SERVICE_ACCOUNT" \
     --execution-environment=gen2 \
@@ -128,24 +114,94 @@ api_url() {
   echo "$url"
 }
 
-# ─── Web app ─────────────────────────────────────────────────────────────────
-# TODO(team): add deploy_web when the frontend is ready.
+deploy_web() {
+  if [[ ! -s "$WEB_DIR/app.py" || ! -s "$WEB_DIR/requirements.txt" ]]; then
+    echo "ERROR: merge feature/dashboard before deploying the frontend." >&2
+    return 1
+  fi
+  local url; url="$(api_url)"
+  local access_flag=--no-allow-unauthenticated
+  case "${GCP_WEB_PUBLIC:-false}" in
+    true) access_flag=--allow-unauthenticated ;;
+    false) ;;
+    *) echo "ERROR: GCP_WEB_PUBLIC must be true or false." >&2; return 1 ;;
+  esac
 
-# ─── Cloud Scheduler ─────────────────────────────────────────────────────────
-# TODO(team): add authenticated collection jobs in the next update.
+  if ! gcloud iam service-accounts describe "$WEB_ACCOUNT" \
+      --project="$PROJECT_ID" >/dev/null 2>&1; then
+    gcloud iam service-accounts create fda-monitor-frontend --project="$PROJECT_ID"
+  fi
+  gcloud run services add-iam-policy-binding "$API_SERVICE" \
+    --project="$PROJECT_ID" --region="$REGION" \
+    --member="serviceAccount:$WEB_ACCOUNT" --role=roles/run.invoker
+
+  log "Deploying ${WEB_SERVICE} from ${WEB_DIR}, pointing at ${url}"
+  gcloud run deploy "$WEB_SERVICE" \
+    --source "$WEB_DIR" \
+    --project="$PROJECT_ID" \
+    --region "$REGION" \
+    --port="$WEB_PORT" \
+    "$access_flag" \
+    --max-instances=1 \
+    --service-account="$WEB_ACCOUNT" \
+    --set-env-vars="API_BASE_URL=$url"
+}
+
+schedule_job() {
+  local job="$1" schedule="$2" path="$3" url="$4"
+  local action=create
+  if gcloud scheduler jobs describe "$job" \
+      --project="$PROJECT_ID" --location="$REGION" >/dev/null 2>&1; then
+    action=update
+  fi
+
+  log "Running '${action}' on scheduler job '${job}' (${schedule} ${SCHEDULER_TZ})"
+  gcloud scheduler jobs "$action" http "$job" \
+    --project="$PROJECT_ID" \
+    --location="$REGION" \
+    --schedule="$schedule" \
+    --time-zone="$SCHEDULER_TZ" \
+    --uri="${url}${path}" \
+    --http-method=POST \
+    --headers="Content-Type=application/json" \
+    --message-body="$MESSAGE_BODY" \
+    --oidc-service-account-email="$SCHEDULER_ACCOUNT" \
+    --oidc-token-audience="$url" \
+    --attempt-deadline=1800s \
+    --max-retry-attempts=0
+}
+
+deploy_scheduler() {
+  local url; url="$(api_url)"
+  gcloud services enable cloudscheduler.googleapis.com --project="$PROJECT_ID"
+  if ! gcloud iam service-accounts describe "$SCHEDULER_ACCOUNT" \
+      --project="$PROJECT_ID" >/dev/null 2>&1; then
+    gcloud iam service-accounts create fda-monitor-scheduler --project="$PROJECT_ID"
+  fi
+  gcloud run services add-iam-policy-binding "$API_SERVICE" \
+    --project="$PROJECT_ID" --region="$REGION" \
+    --member="serviceAccount:$SCHEDULER_ACCOUNT" --role=roles/run.invoker
+  gcloud run services update "$API_SERVICE" \
+    --project="$PROJECT_ID" --region="$REGION" --timeout=1500
+
+  schedule_job fda-collect-recalls "0 10 * * *" /fda-recalls/scrape/ "$url"
+  schedule_job fda-collect-funding "0 12 * * *" /usaspending/scrape/ "$url"
+  schedule_job fda-collect-cdc "0 14 1 * *" /cdc/scrape/ "$url"
+}
 
 show_urls() {
   local url; url="$(api_url)"
   echo "API     : $url"
 }
 
-# ─── entry point ─────────────────────────────────────────────────────────────
 case "${1:-all}" in
   all)       bootstrap; deploy_api; show_urls ;;
   bootstrap) bootstrap ;;
   api|deploy) deploy_api ;;
+  web) deploy_web ;;
+  scheduler) deploy_scheduler ;;
   urls)      show_urls ;;
-  *) echo "usage: $0 {all|bootstrap|api|deploy|urls}" >&2; exit 1 ;;
+  *) echo "usage: $0 {all|bootstrap|api|deploy|scheduler|web|urls}" >&2; exit 1 ;;
 esac
 
 log "Done."

@@ -5,7 +5,7 @@
 the image, so Docker Desktop does not need to be running.
 
 The backend is private and uses Cloud SQL, Cloud Storage, and a database password
-stored in Secret Manager. Frontend deployment and Scheduler jobs are still pending.
+stored in Secret Manager. Scheduler jobs are configured. Frontend deployment is prepared for after the dashboard merge.
 
 ## Configuration
 
@@ -100,3 +100,54 @@ On October 13, 2026, deployment with `api` succeeded. Authenticated requests to 
 and `/states/` returned HTTP 200 with 59 states, and an unauthenticated request to
 `/` returned HTTP 403. Initial setup with `all`/`bootstrap`, collection and bucket
 writes, and the documentation proxy still need end-to-end verification.
+
+## Scheduled collection
+
+Run `bash gcloud_command.sh scheduler` to create or update three authenticated
+Cloud Scheduler HTTP jobs. A dedicated `fda-monitor-scheduler` service account
+receives Cloud Run Invoker on the backend only. Authentication uses OIDC with the
+service URL as audience, following
+[Google's guidance](https://docs.cloud.google.com/scheduler/docs/http-target-auth).
+
+| Job | UTC schedule | Endpoint |
+| --- | --- | --- |
+| FDA recalls and announcements | Daily 10:00 | `/fda-recalls/scrape/` |
+| FDA funding | Daily 12:00 | `/usaspending/scrape/` |
+| CDC illness | First day of each month 14:00 | `/cdc/scrape/` |
+
+The backend request timeout is 25 minutes; Scheduler allows 30 minutes.
+Automatic retries are disabled to reduce overlapping historical collections.
+Scheduler delivery can still be repeated, and timed-out requests can continue
+running; inspect execution logs before manually retrying. These endpoints scan
+historical data, so verify runtime and memory usage after the first execution.
+Job creation alone does not verify that collection succeeds.
+
+## Frontend (prepared for deployment after merge)
+
+The Dockerfile and `web` command are ready for the Streamlit frontend in
+`feature/dashboard`. Application code and dependencies must arrive through the
+normal merge; they are not copied into this branch. No frontend was deployed.
+
+After merging `feature/dashboard` into the checkout containing this deployment
+configuration, review `frontend/app.py` and `frontend/requirements.txt`, then run:
+
+```bash
+bash gcloud_command.sh web
+```
+
+The command fails before contacting GCP if either file is missing or empty.
+It builds `fda-monitor-web` in the configured project and region with authenticated
+access by default. To intentionally publish a public dashboard, set
+`GCP_WEB_PUBLIC=true` before running the command. Public access exposes the data
+shown by the dashboard to anyone with the URL. Deployment is manual; merging does
+not trigger it, and `all` still deploys only the backend.
+
+A dedicated frontend service account receives backend Cloud Run Invoker access.
+`API_BASE_URL` is injected automatically; no service account key is bundled.
+The container and Cloud Run use port 8501, matching the HW3 Streamlit Dockerfile.
+Local environment files are excluded from the uploaded source and container.
+See [Google's Streamlit guide](https://docs.cloud.google.com/run/docs/quickstarts/build-and-deploy/deploy-python-streamlit-service).
+
+Before deployment, verify the merged backend provides GET `/fda-recalls/`, which
+the dashboard expects and the current backend lacks. Funding and CDC also require
+collected data. Validate rendering and authenticated API access after deployment.
