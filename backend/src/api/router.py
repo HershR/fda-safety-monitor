@@ -2,8 +2,8 @@ from fastapi import APIRouter
 from src.api.routes import (
     cdc,
     fiscal_years,
-    monthly_panel,
     recall_scraper,
+    state_monthly_summary,
     states,
     usaspending,
 )
@@ -22,5 +22,7 @@ api_router.include_router(
 )
 api_router.include_router(cdc.router, prefix="/cdc", tags=["CDC"])
 api_router.include_router(
-    monthly_panel.router, prefix="/monthly-panel", tags=["MonthlyPanel"]
+    state_monthly_summary.router,
+    prefix="/state-monthly-summary",
+    tags=["StateMonthlySummary"],
 )

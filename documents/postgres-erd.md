@@ -66,7 +66,7 @@ erDiagram
         int new_award_count
     }
 
-    MONTHLY_PANEL {
+    STATE_MONTHLY_SUMMARY {
         char(2) state_code PK
         char(7) year_month PK
         int fiscal_year FK
@@ -81,9 +81,9 @@ erDiagram
 
     STATE        ||--o{ RECALL_EVENT        : "company located in"
     STATE        ||--o{ ILLNESS_MONTHLY     : "samples reported by"
-    STATE        ||--o{ MONTHLY_PANEL       : "summarized for"
+    STATE        ||--o{ STATE_MONTHLY_SUMMARY : "summarized for"
     RECALL_EVENT ||--|{ RECALL_PRODUCT      : "covers products"
     RECALL_EVENT |o--o{ RECALL_ANNOUNCEMENT : "matched to"
     FISCAL_YEAR  ||--|{ FDA_FUNDING         : "spending for"
-    FISCAL_YEAR  ||--o{ MONTHLY_PANEL       : "budget year of"
+    FISCAL_YEAR  ||--o{ STATE_MONTHLY_SUMMARY : "budget year of"
 ```

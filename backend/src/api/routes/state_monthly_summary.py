@@ -12,9 +12,9 @@ from src.enums import PathogenSource
 from src.models import (
     FiscalYear,
     IllnessMonthly,
-    MonthlyPanel,
     RecallEvent,
     State,
+    StateMonthlySummary,
 )
 from src.utils.pipeline.db_utils import save_rows
 
@@ -55,7 +55,7 @@ def build_month(
     state_codes: Sequence[str],
     events: Sequence[RecallEvent],
     illness: Sequence[IllnessMonthly],
-) -> list[MonthlyPanel]:
+) -> list[StateMonthlySummary]:
     """One row per state for the given month"""
     events_by_state: dict[str | None, list[RecallEvent]] = defaultdict(list)
     for e in events:
@@ -82,7 +82,7 @@ def build_month(
             if e.classification_lag_days is not None
         ]
         rows.append(
-            MonthlyPanel(
+            StateMonthlySummary(
                 state_code=state,
                 year_month=year_month,
                 fiscal_year=fiscal_year,
@@ -153,59 +153,61 @@ def rebuild_months(session: Session, months: list[str]) -> int:
     return saved
 
 
-def rebuild_panel(session: Session) -> int:
+def rebuild_all(session: Session) -> int:
     last_report = session.exec(select(func.max(RecallEvent.report_date))).one()
     if last_report is None:
         return 0
     return rebuild_months(session, all_months(last_report))
 
 
-@router.get("/", response_model=list[MonthlyPanel])
-def get_monthly_panels(
+@router.get("/", response_model=list[StateMonthlySummary])
+def get_state_monthly_summaries(
     session: SessionDep,
     states: Annotated[list[str] | None, Query()] = None,
     start_year: int | None = None,
     end_year: int | None = None,
     fiscal_year: int | None = None,
 ):
-    """List panel rows, filtered by states, calendar years or fiscal year"""
-    statement = select(MonthlyPanel)
+    """List summary rows, filtered by states, calendar years or fiscal year"""
+    statement = select(StateMonthlySummary)
     if states:
-        statement = statement.where(MonthlyPanel.state_code.in_(states))
+        statement = statement.where(StateMonthlySummary.state_code.in_(states))
     if start_year:
         statement = statement.where(
-            MonthlyPanel.year_month >= f"{start_year}-01"
+            StateMonthlySummary.year_month >= f"{start_year}-01"
         )
     if end_year:
         statement = statement.where(
-            MonthlyPanel.year_month <= f"{end_year}-12"
+            StateMonthlySummary.year_month <= f"{end_year}-12"
         )
     if fiscal_year:
-        statement = statement.where(MonthlyPanel.fiscal_year == fiscal_year)
+        statement = statement.where(
+            StateMonthlySummary.fiscal_year == fiscal_year
+        )
     statement = statement.order_by(
-        MonthlyPanel.year_month, MonthlyPanel.state_code
+        StateMonthlySummary.year_month, StateMonthlySummary.state_code
     )
     return session.exec(statement).all()
 
 
-@router.get("/{year_month}", response_model=list[MonthlyPanel])
-def get_monthly_panel(
+@router.get("/{year_month}", response_model=list[StateMonthlySummary])
+def get_state_monthly_summary(
     session: SessionDep,
     year_month: str,
     states: Annotated[list[str] | None, Query()] = None,
 ):
-    """Panel rows for one YYYY-MM month, optionally filtered by states"""
-    statement = select(MonthlyPanel).where(
-        MonthlyPanel.year_month == year_month
+    """Summary rows for one YYYY-MM month, optionally filtered by states"""
+    statement = select(StateMonthlySummary).where(
+        StateMonthlySummary.year_month == year_month
     )
     if states:
-        statement = statement.where(MonthlyPanel.state_code.in_(states))
-    statement = statement.order_by(MonthlyPanel.state_code)
+        statement = statement.where(StateMonthlySummary.state_code.in_(states))
+    statement = statement.order_by(StateMonthlySummary.state_code)
     results = session.exec(statement).all()
     if not results:
         raise HTTPException(
             status_code=404,
-            detail=f"Monthly panel for {year_month} was not found",
+            detail=f"State monthly summary for {year_month} was not found",
         )
     return results
 
@@ -213,14 +215,14 @@ def get_monthly_panel(
 @router.post("/rebuild/")
 def rebuild(session: SessionDep):
     """Rebuild every month from 2012 to the latest recall"""
-    return {"monthly_panel": rebuild_panel(session)}
+    return {"state_monthly_summary": rebuild_all(session)}
 
 
 @router.post("/rebuild/{year}")
 def rebuild_year(session: SessionDep, year: int):
     """Rebuild all months of one year, up to the latest recall"""
     months = [f"{year:04d}-{month:02d}" for month in range(1, 13)]
-    return {"monthly_panel": rebuild_months(session, months)}
+    return {"state_monthly_summary": rebuild_months(session, months)}
 
 
 @router.post("/rebuild/{year}/{month}")
@@ -229,5 +231,7 @@ def rebuild_year_month(
 ):
     """Rebuild one month"""
     return {
-        "monthly_panel": rebuild_months(session, [f"{year:04d}-{month:02d}"])
+        "state_monthly_summary": rebuild_months(
+            session, [f"{year:04d}-{month:02d}"]
+        )
     }

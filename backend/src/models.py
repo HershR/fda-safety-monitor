@@ -94,8 +94,8 @@ class FDAFunding(SQLModel, table=True):
     new_award_count: int
 
 
-class MonthlyPanel(SQLModel, table=True):
-    __tablename__ = "monthly_panel"
+class StateMonthlySummary(SQLModel, table=True):
+    __tablename__ = "state_monthly_summary"
 
     state_code: str = Field(
         primary_key=True, max_length=2, foreign_key="state.state_code"
