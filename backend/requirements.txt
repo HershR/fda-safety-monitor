@@ -8,3 +8,4 @@ requests==2.34.2
 beautifulsoup4==4.15.0
 google-cloud-storage==3.16.0
 uuid6==2025.0.1
+stealth-requests

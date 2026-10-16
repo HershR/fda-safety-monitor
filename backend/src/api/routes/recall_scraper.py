@@ -1,7 +1,8 @@
 from collections import defaultdict
 from datetime import date, datetime
 
-import requests
+import stealth_requests as requests
+from curl_cffi.requests.exceptions import RequestException
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException
 from sqlmodel import select
@@ -44,10 +45,7 @@ def scrape_announcements(bucket, run_id) -> list[RecallAnnouncement]:
         f"{FDA}/datatables/views/ajax",
         params=params,
         timeout=60,
-        headers={
-            "User-Agent": "Mozilla/5.0",
-            "X-Requested-With": "XMLHttpRequest",
-        },
+        headers={"X-Requested-With": "XMLHttpRequest"},
     )
     if not resp.ok:
         print(
@@ -174,9 +172,10 @@ def scrape(session: SessionDep):
     """Scrape FDA food recalls from openFDA and FDA announcements page.
 
     Returns:
-        one RecallAnnouncement per food announcement
+        dict: ``run_id`` for this run, plus the number of rows saved to
+        ``recall_event``, ``recall_product``, and ``recall_announcement``.
     Raises:
-        requests.HTTPError: If fda.gov returns an error
+        HTTPError: If fda.gov returns an error
         
     """
     run_id = str(uuid7())
@@ -197,7 +196,7 @@ def scrape(session: SessionDep):
         announcements = scrape_announcements(bucket, run_id)
         saved["recall_announcement"] = save_rows(session, announcements)
         session.commit()
-    except (requests.RequestException, RuntimeError) as e:
+    except (RequestException, RuntimeError) as e:
         raise HTTPException(
             status_code=502,
             detail=f"openFDA saved {saved}; FDA announcements failed: {e}",
