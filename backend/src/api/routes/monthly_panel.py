@@ -5,7 +5,7 @@ from decimal import Decimal
 from statistics import median
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 from sqlmodel import Session, func, select
 from src.database import SessionDep
 from src.enums import PathogenSource
@@ -103,45 +103,61 @@ def build_month(
     return rows
 
 
-def rebuild_panel(session: Session) -> int:
-    """Does not delete old rows, existing rows are overwritten"""
-    state_codes = session.exec(select(State.state_code)).all()
+def rebuild_month(
+    session: Session,
+    year_month: str,
+    state_codes: Sequence[str],
+    fiscal_years: Sequence[FiscalYear],
+) -> int:
+    start, end = month_range(year_month)
+    fiscal_year = find_fiscal_year(fiscal_years, start)
+    if fiscal_year is None:
+        raise HTTPException(
+            status_code=500,
+            detail=f"No fiscal year for {year_month}, "
+            "add it to data/fiscal_years.json",
+        )
+    events = session.exec(
+        select(RecallEvent).where(
+            RecallEvent.report_date >= start,
+            RecallEvent.report_date < end,
+            RecallEvent.state_code.is_not(None),
+        )
+    ).all()
+    illness = session.exec(
+        select(IllnessMonthly).where(IllnessMonthly.year_month == year_month)
+    ).all()
+    rows = build_month(year_month, fiscal_year, state_codes, events, illness)
+    return save_rows(session, rows, True)
+
+
+def rebuild_months(session: Session, months: list[str]) -> int:
+    """
+    Rebuilds the given YYYY-MM months, skipping months after the latest recall.
+    Does not delete old rows, existing rows are overwritten.
+    """
     last_report = session.exec(select(func.max(RecallEvent.report_date))).one()
     if last_report is None:
-        print("No report")
         return 0
+    last_month = f"{last_report.year:04d}-{last_report.month:02d}"
+    state_codes = session.exec(select(State.state_code)).all()
     fiscal_years = session.exec(select(FiscalYear)).all()
 
     saved = 0
-    print("last report: ", last_report)
-    for year_month in all_months(last_report):
-        start, end = month_range(year_month)
-        fiscal_year = find_fiscal_year(fiscal_years, start)
-        if fiscal_year is None:
-            raise HTTPException(
-                status_code=500,
-                detail=f"No fiscal year for {year_month}, "
-                "add it to data/fiscal_years.json",
+    for year_month in months:
+        if year_month <= last_month:
+            saved += rebuild_month(
+                session, year_month, state_codes, fiscal_years
             )
-        events = session.exec(
-            select(RecallEvent).where(
-                RecallEvent.report_date >= start,
-                RecallEvent.report_date < end,
-                RecallEvent.state_code.is_not(None),
-            )
-        ).all()
-        illness = session.exec(
-            select(IllnessMonthly).where(
-                IllnessMonthly.year_month == year_month
-            )
-        ).all()
-        rows = build_month(
-            year_month, fiscal_year, state_codes, events, illness
-        )
-        saved += save_rows(session, rows, True)
-
     session.commit()
     return saved
+
+
+def rebuild_panel(session: Session) -> int:
+    last_report = session.exec(select(func.max(RecallEvent.report_date))).one()
+    if last_report is None:
+        return 0
+    return rebuild_months(session, all_months(last_report))
 
 
 @router.get("/", response_model=list[MonthlyPanel])
@@ -152,6 +168,7 @@ def get_monthly_panels(
     end_year: int | None = None,
     fiscal_year: int | None = None,
 ):
+    """List panel rows, filtered by states, calendar years or fiscal year"""
     statement = select(MonthlyPanel)
     if states:
         statement = statement.where(MonthlyPanel.state_code.in_(states))
@@ -177,6 +194,7 @@ def get_monthly_panel(
     year_month: str,
     states: Annotated[list[str] | None, Query()] = None,
 ):
+    """Panel rows for one YYYY-MM month, optionally filtered by states"""
     statement = select(MonthlyPanel).where(
         MonthlyPanel.year_month == year_month
     )
@@ -194,4 +212,22 @@ def get_monthly_panel(
 
 @router.post("/rebuild/")
 def rebuild(session: SessionDep):
+    """Rebuild every month from 2012 to the latest recall"""
     return {"monthly_panel": rebuild_panel(session)}
+
+
+@router.post("/rebuild/{year}")
+def rebuild_year(session: SessionDep, year: int):
+    """Rebuild all months of one year, up to the latest recall"""
+    months = [f"{year:04d}-{month:02d}" for month in range(1, 13)]
+    return {"monthly_panel": rebuild_months(session, months)}
+
+
+@router.post("/rebuild/{year}/{month}")
+def rebuild_year_month(
+    session: SessionDep, year: int, month: Annotated[int, Path(ge=1, le=12)]
+):
+    """Rebuild one month"""
+    return {
+        "monthly_panel": rebuild_months(session, [f"{year:04d}-{month:02d}"])
+    }
