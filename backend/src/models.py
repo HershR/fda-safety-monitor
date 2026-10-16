@@ -25,7 +25,9 @@ class RecallEvent(SQLModel, table=True):
     __tablename__ = "recall_event"
 
     event_id: str = Field(primary_key=True)
-    state_code: str | None = Field(default=None, max_length=2, foreign_key="state.state_code")
+    state_code: str | None = Field(
+        default=None, max_length=2, foreign_key="state.state_code"
+    )
     classification: str
     recall_initiation_date: date
     center_classification_date: date | None = None
@@ -33,7 +35,7 @@ class RecallEvent(SQLModel, table=True):
     status: str
     voluntary_mandated: str
     recalling_firm: str
-    classification_lag_days: int |None = None
+    classification_lag_days: int | None = None
     product_count: int
     collected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -92,8 +94,8 @@ class FDAFunding(SQLModel, table=True):
     new_award_count: int
 
 
-class MonthlyPanel(SQLModel, table=True):
-    __tablename__ = "monthly_panel"
+class StateMonthlySummary(SQLModel, table=True):
+    __tablename__ = "state_monthly_summary"
 
     state_code: str = Field(
         primary_key=True, max_length=2, foreign_key="state.state_code"
@@ -102,8 +104,8 @@ class MonthlyPanel(SQLModel, table=True):
     fiscal_year: int = Field(foreign_key="fiscal_year.fiscal_year")
     recall_events: int
     class_i_events: int
-    class_i_share: Decimal
-    median_classification_lag: Decimal
-    isolates_human: int
-    isolates_food_reference: int
+    class_i_share: Decimal | None = None
+    median_classification_lag: Decimal | None = None
+    isolates_human: int | None = None
+    isolates_food_reference: int | None = None
     calculated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
