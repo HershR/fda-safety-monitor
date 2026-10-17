@@ -2,17 +2,17 @@ from collections import defaultdict
 from datetime import date, datetime
 
 import stealth_requests as requests
-from curl_cffi.requests.exceptions import RequestException
 from bs4 import BeautifulSoup
+from curl_cffi.requests.exceptions import RequestException
 from fastapi import APIRouter, HTTPException
 from sqlmodel import select
-from uuid6 import uuid7
 from src.config import GCP_SERVICE_ACCOUNT_KEY
 from src.database import SessionDep
 from src.gcp_service import get_bucket, get_credientials
 from src.models import RecallAnnouncement, RecallEvent, RecallProduct, State
 from src.utils.pipeline.bucket_utils import save_raw
 from src.utils.pipeline.db_utils import save_rows
+from uuid6 import uuid7
 
 router = APIRouter()
 
@@ -105,7 +105,12 @@ def fetch_openfda_records(bucket, run_id) -> list[dict]:
             resp.raise_for_status()
             payload = resp.json()
             save_raw(
-                bucket, run_id, OPENFDA_SOURCE, resp.url, f"{year}_{page}", payload
+                bucket,
+                run_id,
+                OPENFDA_SOURCE,
+                resp.url,
+                f"{year}_{page}",
+                payload,
             )
 
             results = payload.get("results", [])
@@ -117,9 +122,9 @@ def fetch_openfda_records(bucket, run_id) -> list[dict]:
     return records
 
 
-def build_events_and_products(records, valid_state_codes) -> tuple[
-        list[RecallEvent], list[RecallProduct]
-        ]:
+def build_events_and_products(
+    records, valid_state_codes
+) -> tuple[list[RecallEvent], list[RecallProduct]]:
 
     def d(s: str) -> date:
         return datetime.strptime(s, "%Y%m%d").date() if s else None
@@ -176,10 +181,12 @@ def scrape(session: SessionDep):
         ``recall_event``, ``recall_product``, and ``recall_announcement``.
     Raises:
         HTTPError: If fda.gov returns an error
-        
+
     """
     run_id = str(uuid7())
-    bucket = get_bucket(get_credientials() if GCP_SERVICE_ACCOUNT_KEY else None)
+    bucket = get_bucket(
+        get_credientials() if GCP_SERVICE_ACCOUNT_KEY else None
+    )
     valid_state_codes = set(session.exec(select(State.state_code)).all())
 
     # openFDA
@@ -201,5 +208,5 @@ def scrape(session: SessionDep):
             status_code=502,
             detail=f"openFDA saved {saved}; FDA announcements failed: {e}",
         )
-    
+
     return {"run_id": run_id, **saved}

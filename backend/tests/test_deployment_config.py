@@ -18,7 +18,9 @@ def connection_parameters(monkeypatch, host):
 
     path = Path(__file__).resolve().parents[1] / "src/config.py"
     config = runpy.run_path(str(path))
-    _, parameters = PGDialect_psycopg().create_connect_args(config["DATABASE_URI"])
+    _, parameters = PGDialect_psycopg().create_connect_args(
+        config["DATABASE_URI"]
+    )
     return parameters
 
 
@@ -52,7 +54,9 @@ def test_no_key_file(monkeypatch):
 
 
 def test_local_key_file(monkeypatch):
-    monkeypatch.setattr(gcp_service, "GCP_SERVICE_ACCOUNT_KEY", "/test/key.json")
+    monkeypatch.setattr(
+        gcp_service, "GCP_SERVICE_ACCOUNT_KEY", "/test/key.json"
+    )
     credentials = object()
 
     def read_test_key(path):

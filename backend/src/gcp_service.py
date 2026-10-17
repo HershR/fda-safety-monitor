@@ -14,7 +14,9 @@ def get_credientials():
 
 def get_bucket(credentials=None):
     if credentials:
-        client = storage.Client(project=GCP_PROJECT_ID, credentials=credentials)
+        client = storage.Client(
+            project=GCP_PROJECT_ID, credentials=credentials
+        )
     else:
         client = storage.Client(project=GCP_PROJECT_ID)
     return client.bucket(GCP_BUCKET)
