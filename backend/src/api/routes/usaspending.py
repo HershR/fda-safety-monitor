@@ -14,12 +14,21 @@ from src.utils.pipeline.db_utils import save_rows
 router = APIRouter()
 
 SOURCE = "usaspending"
-TOPTIER_CODE = "075"
+TOPTIER_CODE = "075" # code for HHS; FDA is a sub-agency under HHS
 USASPENDING_URL = "https://api.usaspending.gov/api/v2/agency/" + TOPTIER_CODE + "/sub_agency/"
 FIRST_FISCAL_YEAR = 2017
 
 
 def fetch_fda_record(fiscal_year, bucket, run_id):
+    """
+    Checks the USASpending API pages and fetches the FDA record
+    for the given fiscal year.
+
+    Once it locates the record, saves it to the GCS bucket
+    along with its metadata (fiscal_year, toptier_code).
+    
+    Returns None if FDA record is not found until the last page.
+    """
     page = 1
 
     while True:
@@ -56,6 +65,15 @@ def fetch_fda_record(fiscal_year, bucket, run_id):
 
 
 def scrape_funding(bucket, run_id):
+    """
+    Calls fetch_fda_record() between 
+    the FIRST_FISCAL_YEAR(2017) and the current year.
+ 
+    Converts each year's record into a FDAFunding object format and
+    returns a list of objects.
+    
+    Skips if record is not found in that year.
+    """
     today = date.today()
     rows = []
 
@@ -78,6 +96,15 @@ def scrape_funding(bucket, run_id):
 
 @router.post("/scrape/")
 def scrape(session: SessionDep):
+    """
+    Collects FDA funding data (2017 ~ current) from USASpending API.
+ 
+    Saves the raw data into the GCS bucket and
+    the cleaned data into the fda_funding table
+ 
+    Returns the number of saved rows in a 
+    dictionary format - {"fda_funding": saved}
+    """    
     bucket = get_bucket(get_credientials())
     run_id = str(uuid7())
     rows = scrape_funding(bucket, run_id)
@@ -88,11 +115,23 @@ def scrape(session: SessionDep):
 
 @router.get("/", response_model=list[FDAFunding])
 def get_fda_funding(session: SessionDep):
+    """
+    Returns all records saved in the fda_funding table.
+
+    If the same year's records were recorded over multiple days,
+    each record is saved on seperate rows.
+    """    
     return session.exec(select(FDAFunding)).all()
 
 
 @router.get("/{fiscal_year}", response_model=FDAFunding)
 def get_fda_funding_by_year(session: SessionDep, fiscal_year: int):
+    """
+    Returns the most recently collected FDA funding record 
+    for the given fiscal year.
+    
+    Returns 404 error if no record is found in that year.
+    """    
     statement = (
         select(FDAFunding)
         .where(FDAFunding.fiscal_year == fiscal_year)

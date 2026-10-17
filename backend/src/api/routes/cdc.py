@@ -17,6 +17,16 @@ PAGE_SIZE = 5000
 
 
 def fetch_isolates(bucket, run_id, valid_state_codes):
+    """
+    Checks the CDC BEAM Socrata API pages and fetches the
+    isolate counts by state, year, month, pathogen, source_type
+ 
+    Saves the raw data into the GCS bucket via save_raw().
+    Skip the row if its state code is not included in valid_state_codes.
+
+    Converts the cleaned data into an IllnessMonthly object format
+    and returns a list of objects.
+    """
     rows = []
     offset = 0
     page = 1
@@ -65,6 +75,17 @@ def fetch_isolates(bucket, run_id, valid_state_codes):
 
 @router.post("/scrape/")
 def scrape(session: SessionDep):
+    """
+    Collects monthly isolate cases by pathogen from CDC BEAM API.
+ 
+    Fetches valid_state_codes by checking the state table
+    and filters out non-valid state codes from CDC records.
+    Saves the raw data into the GCS bucket and
+    the cleaned data into the illness_monthly table
+ 
+    Returns the number of saved rows in a 
+    dictionary format - {"illness_monthly": saved}
+    """
     states = session.exec(select(State)).all()
     valid_state_codes = set()
     for s in states:
@@ -80,6 +101,11 @@ def scrape(session: SessionDep):
 
 @router.get("/{state_code}", response_model=list[IllnessMonthly])
 def get_illness_monthly_by_state(session: SessionDep, state_code: str):
+    """
+    Returns all monthly CDC records for the given state code.
+ 
+    Returns 404 error if no record is found for that state.
+    """
     statement = select(IllnessMonthly).where(IllnessMonthly.state_code == state_code)
     results = session.exec(statement).all()
 
