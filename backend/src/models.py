@@ -7,14 +7,14 @@ from src.enums import PathogenSource
 
 
 class State(SQLModel, table=True):
-    __tablename__ = "state"
+    __tablename__ = "state"  # type: ignore
 
     state_code: str = Field(primary_key=True, max_length=2)
     state_name: str
 
 
 class FiscalYear(SQLModel, table=True):
-    __tablename__ = "fiscal_year"
+    __tablename__ = "fiscal_year"  # type: ignore
 
     fiscal_year: int = Field(primary_key=True)
     fy_start: date
@@ -22,7 +22,7 @@ class FiscalYear(SQLModel, table=True):
 
 
 class RecallEvent(SQLModel, table=True):
-    __tablename__ = "recall_event"
+    __tablename__ = "recall_event"  # type: ignore
 
     event_id: str = Field(primary_key=True)
     state_code: str | None = Field(
@@ -41,7 +41,7 @@ class RecallEvent(SQLModel, table=True):
 
 
 class RecallProduct(SQLModel, table=True):
-    __tablename__ = "recall_product"
+    __tablename__ = "recall_product"  # type: ignore
 
     recall_number: str = Field(primary_key=True)
     event_id: str = Field(foreign_key="recall_event.event_id")
@@ -52,7 +52,7 @@ class RecallProduct(SQLModel, table=True):
 
 
 class RecallAnnouncement(SQLModel, table=True):
-    __tablename__ = "recall_announcement"
+    __tablename__ = "recall_announcement"  # type: ignore
 
     announcement_id: str = Field(primary_key=True)
     announce_date: date
@@ -70,7 +70,7 @@ class RecallAnnouncement(SQLModel, table=True):
 
 
 class IllnessMonthly(SQLModel, table=True):
-    __tablename__ = "illness_monthly"
+    __tablename__ = "illness_monthly"  # type: ignore
 
     state_code: str = Field(
         primary_key=True, max_length=2, foreign_key="state.state_code"
@@ -83,7 +83,7 @@ class IllnessMonthly(SQLModel, table=True):
 
 
 class FDAFunding(SQLModel, table=True):
-    __tablename__ = "fda_funding"
+    __tablename__ = "fda_funding"  # type: ignore
 
     fiscal_year: int = Field(
         primary_key=True, foreign_key="fiscal_year.fiscal_year"
@@ -95,7 +95,7 @@ class FDAFunding(SQLModel, table=True):
 
 
 class StateMonthlySummary(SQLModel, table=True):
-    __tablename__ = "state_monthly_summary"
+    __tablename__ = "state_monthly_summary"  # type: ignore
 
     state_code: str = Field(
         primary_key=True, max_length=2, foreign_key="state.state_code"

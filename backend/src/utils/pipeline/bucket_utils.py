@@ -9,7 +9,7 @@ def save_raw(
     run_id: str,
     source: str,
     url: str,
-    page: int | None = 1,
+    page: int | str | None = 1,
     payload: dict | list | str | None = None,
 ):
     """

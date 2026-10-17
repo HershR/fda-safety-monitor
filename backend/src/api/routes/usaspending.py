@@ -1,9 +1,9 @@
-from datetime import date
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import requests
 from fastapi import APIRouter, HTTPException
-from sqlmodel import select
+from sqlmodel import col, select
 from src.database import SessionDep
 from src.gcp_service import get_bucket, get_credientials
 from src.models import FDAFunding
@@ -78,7 +78,7 @@ def scrape_funding(bucket, run_id):
 
     Skips if record is not found in that year.
     """
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     rows = []
 
     for fiscal_year in range(FIRST_FISCAL_YEAR, today.year + 1):
@@ -139,7 +139,7 @@ def get_fda_funding_by_year(session: SessionDep, fiscal_year: int):
     statement = (
         select(FDAFunding)
         .where(FDAFunding.fiscal_year == fiscal_year)
-        .order_by(FDAFunding.collected_at.desc())
+        .order_by(col(FDAFunding.collected_at).desc())
     )
 
     result = session.exec(statement).first()

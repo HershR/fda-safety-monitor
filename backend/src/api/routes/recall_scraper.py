@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 import stealth_requests as requests
 from bs4 import BeautifulSoup
@@ -66,7 +66,13 @@ def scrape_announcements(bucket, run_id) -> list[RecallAnnouncement]:
         link = BeautifulSoup(str(brand), "html.parser").find("a")
         if not link:
             continue  # announcement_id comes from the link
-        url = FDA + link["href"]
+        resource_link = link.get("href")
+        if not resource_link:
+            print(
+                f"Recalled Announcment Parsing Error: Missing resource link for item: [{date_cell}|{brand}|{product}|{company}]"
+            )
+            continue
+        url = f"{FDA} + {resource_link}"
         announcements.append(
             RecallAnnouncement(
                 announcement_id=url.rstrip("/").rsplit("/", 1)[-1],
@@ -87,7 +93,7 @@ def scrape_announcements(bucket, run_id) -> list[RecallAnnouncement]:
 
 def fetch_openfda_records(bucket, run_id) -> list[dict]:
     records = []
-    for year in range(OPENFDA_FIRST_YEAR, date.today().year + 1):
+    for year in range(OPENFDA_FIRST_YEAR, datetime.now(timezone.utc).year + 1):
         skip = 0
         page = 1
         while skip <= OPENFDA_MAX_SKIP:
@@ -126,21 +132,30 @@ def build_events_and_products(
     records, valid_state_codes
 ) -> tuple[list[RecallEvent], list[RecallProduct]]:
 
-    def d(s: str) -> date:
+    def date_from_string(s: str) -> date | None:
         return datetime.strptime(s, "%Y%m%d").date() if s else None
 
     by_event = defaultdict(list)
     for r in records:
         by_event[r["event_id"]].append(r)
 
-    events, products = [], []
+    events: list[RecallEvent] = []
+    products: list[RecallProduct] = []
     for event_id, recs in by_event.items():
         r = recs[0]
         if not r.get("recall_initiation_date") or not r.get("report_date"):
             continue  # these are required
-        initiated = d(r["recall_initiation_date"])
-        classified = d(r.get("center_classification_date"))
+        initiated = date_from_string(r.get("recall_initiation_date"))
+        classified = date_from_string(r.get("center_classification_date"))
+        report_date = date_from_string(r.get("report_date"))
         state = r.get("state", "")
+        if initiated is None or classified is None or report_date is None:
+            print(
+                f"Recall Event Parsing Error: Missing or malformed dates for {event_id}"
+            )
+            continue
+        classification_lag = (classified - initiated).days
+
         events.append(
             RecallEvent(
                 event_id=event_id,
@@ -148,11 +163,11 @@ def build_events_and_products(
                 classification=r["classification"],
                 recall_initiation_date=initiated,
                 center_classification_date=classified,
-                report_date=d(r["report_date"]),
+                report_date=report_date,
                 status=r["status"],
                 voluntary_mandated=r["voluntary_mandated"],
                 recalling_firm=r["recalling_firm"],
-                classification_lag_days=(classified - initiated).days
+                classification_lag_days=classification_lag
                 if classified
                 else None,
                 product_count=len(recs),
@@ -193,15 +208,15 @@ def scrape(session: SessionDep):
     records = fetch_openfda_records(bucket, run_id)
     events, products = build_events_and_products(records, valid_state_codes)
     saved = {
-        "recall_event": save_rows(session, events),
-        "recall_product": save_rows(session, products),
+        "recall_event": save_rows(session, events),  # type: ignore
+        "recall_product": save_rows(session, products),  # type: ignore
     }
     session.commit()  # kept even if announcements fail below
 
     # FDA announcements
     try:
         announcements = scrape_announcements(bucket, run_id)
-        saved["recall_announcement"] = save_rows(session, announcements)
+        saved["recall_announcement"] = save_rows(session, announcements)  # type: ignore
         session.commit()
     except (RequestException, RuntimeError) as e:
         raise HTTPException(
