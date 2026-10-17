@@ -21,14 +21,18 @@ def retrieve_data_from_api(api_base_url: str, path: str) -> list:
             google.auth.transport.requests.Request(), api_base_url
         )
         headers["Authorization"] = f"Bearer {token}"
-    response = requests.get(f"{api_base_url}{path}", headers=headers, timeout=60)
+    response = requests.get(
+        f"{api_base_url}{path}", headers=headers, timeout=60
+    )
     if response.status_code == 404:
         return []
     response.raise_for_status()
     return response.json()
 
 
-def summarize_distribution(df: pd.DataFrame, column_name: str, top_n: int = 10) -> dict:
+def summarize_distribution(
+    df: pd.DataFrame, column_name: str, top_n: int = 10
+) -> dict:
     distr = df[column_name].value_counts()
     return distr.head(top_n).to_dict()
 
@@ -54,9 +58,13 @@ series_colors = {
 
 
 @st.cache_data(ttl=600)
-def retrieve_national_illness(api_base_url: str, state_codes: tuple) -> pd.DataFrame:
+def retrieve_national_illness(
+    api_base_url: str, state_codes: tuple
+) -> pd.DataFrame:
     frames = [
-        pd.DataFrame(retrieve_data_from_api(api_base_url, f"/cdc/{state_code}"))
+        pd.DataFrame(
+            retrieve_data_from_api(api_base_url, f"/cdc/{state_code}")
+        )
         for state_code in state_codes
     ]
     frames = [frame for frame in frames if not frame.empty]
@@ -73,9 +81,13 @@ def build_yearly_summary(
     latest_funding = funding.sort_values("collected_at").drop_duplicates(
         "fiscal_year", keep="last"
     )
-    latest_funding = latest_funding[latest_funding["fiscal_year"].isin(cpi_u_september)]
+    latest_funding = latest_funding[
+        latest_funding["fiscal_year"].isin(cpi_u_september)
+    ]
     base_year = max(cpi_u_september)
-    nominal = latest_funding.set_index("fiscal_year")["total_obligations"].astype(float)
+    nominal = latest_funding.set_index("fiscal_year")[
+        "total_obligations"
+    ].astype(float)
     cpi = nominal.index.map(cpi_u_september)
     yearly = pd.DataFrame(
         {
@@ -97,11 +109,15 @@ def build_yearly_summary(
         yearly["Class I share"] = by_year["classification"].apply(
             lambda c: (c == "Class I").mean()
         )
-        yearly["Median days to classify"] = by_year["classification_lag_days"].median()
+        yearly["Median days to classify"] = by_year[
+            "classification_lag_days"
+        ].median()
 
     if not illness.empty:
         human = illness[illness["source_type"].str.lower() == "human"].copy()
-        human["fiscal_year"] = to_fiscal_year(pd.to_datetime(human["year_month"]))
+        human["fiscal_year"] = to_fiscal_year(
+            pd.to_datetime(human["year_month"])
+        )
         months = human.groupby("fiscal_year")["year_month"].nunique()
         isolates = human.groupby("fiscal_year")["isolate_count"].sum()
         yearly["Human isolates"] = isolates[months == 12]
@@ -115,8 +131,12 @@ if __name__ == "__main__":
 
     try:
         states = pd.DataFrame(retrieve_data_from_api(api_base_url, "/states/"))
-        funding = pd.DataFrame(retrieve_data_from_api(api_base_url, "/usaspending/"))
-        events = pd.DataFrame(retrieve_data_from_api(api_base_url, "/fda-recalls/"))
+        funding = pd.DataFrame(
+            retrieve_data_from_api(api_base_url, "/usaspending/")
+        )
+        events = pd.DataFrame(
+            retrieve_data_from_api(api_base_url, "/fda-recalls/")
+        )
     except requests.RequestException as e:
         st.error(
             f"Could not reach the API at {api_base_url}. Check that the backend "
@@ -139,22 +159,30 @@ if __name__ == "__main__":
                 retrieve_data_from_api(api_base_url, f"/cdc/{selected_state}")
             )
         except requests.RequestException as e:
-            st.error(f"Could not load illness data for {selected_state}.\n\n{e}")
+            st.error(
+                f"Could not load illness data for {selected_state}.\n\n{e}"
+            )
             illness = pd.DataFrame()
 
         selected_pathogens = []
         if not illness.empty:
             st.write("Filter illness by Pathogen")
             for pathogen in sorted(illness["pathogen"].dropna().unique()):
-                if st.checkbox(pathogen, value=True, key=f"checkbox_{pathogen}"):
+                if st.checkbox(
+                    pathogen, value=True, key=f"checkbox_{pathogen}"
+                ):
                     selected_pathogens.append(pathogen)
 
         selected_classes = []
         if not events.empty:
             st.write("Filter recalls by Classification")
-            for classification in sorted(events["classification"].dropna().unique()):
+            for classification in sorted(
+                events["classification"].dropna().unique()
+            ):
                 if st.checkbox(
-                    classification, value=True, key=f"checkbox_{classification}"
+                    classification,
+                    value=True,
+                    key=f"checkbox_{classification}",
                 ):
                     selected_classes.append(classification)
 
@@ -165,7 +193,9 @@ if __name__ == "__main__":
         )
     else:
         events["report_date"] = pd.to_datetime(events["report_date"])
-        filtered_events = events[events["classification"].isin(selected_classes)]
+        filtered_events = events[
+            events["classification"].isin(selected_classes)
+        ]
         filtered_events = filtered_events.sort_values(
             by=["report_date", "recalling_firm"], ascending=[False, True]
         )
@@ -210,14 +240,18 @@ if __name__ == "__main__":
             state_df = pd.DataFrame(
                 {"count": state_counts.values()},
                 index=pd.CategoricalIndex(
-                    state_counts.keys(), categories=state_counts.keys(), ordered=True
+                    state_counts.keys(),
+                    categories=state_counts.keys(),
+                    ordered=True,
                 ),
             )
             st.bar_chart(state_df, x_label="State", y_label="Recall events")
 
     st.header(f"Foodborne illness in {state_names.get(selected_state)}")
     if illness.empty:
-        st.info(f"No CDC illness data for {state_names.get(selected_state)} yet.")
+        st.info(
+            f"No CDC illness data for {state_names.get(selected_state)} yet."
+        )
     else:
         human = illness[
             (illness["source_type"].str.lower() == "human")
@@ -225,7 +259,9 @@ if __name__ == "__main__":
         ]
         st.subheader("Human isolates per month")
         monthly_isolates = human.groupby("year_month")["isolate_count"].sum()
-        st.bar_chart(monthly_isolates, x_label="Month", y_label="Human isolates")
+        st.bar_chart(
+            monthly_isolates, x_label="Month", y_label="Human isolates"
+        )
 
     st.header("FDA funding")
     if funding.empty:
@@ -239,7 +275,9 @@ if __name__ == "__main__":
         )["total_obligations"].astype(float)
         st.subheader("FDA obligations by fiscal year ($ billions)")
         st.bar_chart(
-            obligations / 1_000_000_000, x_label="Fiscal year", y_label="$ billions"
+            obligations / 1_000_000_000,
+            x_label="Fiscal year",
+            y_label="$ billions",
         )
 
     st.header("Does FDA funding track food safety?")
@@ -264,7 +302,9 @@ if __name__ == "__main__":
             "with all 12 months of CDC data are shown."
         )
 
-        st.subheader(f"FDA funding, nominal vs. inflation adjusted (FY{base_year} $)")
+        st.subheader(
+            f"FDA funding, nominal vs. inflation adjusted (FY{base_year} $)"
+        )
         funding_long = (
             yearly[["Nominal funding ($B)", "Real funding ($B)"]]
             .reset_index()
@@ -272,10 +312,16 @@ if __name__ == "__main__":
         )
         funding_chart = (
             alt.Chart(funding_long)
-            .mark_line(point=alt.OverlayMarkDef(size=70, filled=True), strokeWidth=2)
+            .mark_line(
+                point=alt.OverlayMarkDef(size=70, filled=True), strokeWidth=2
+            )
             .encode(
                 x=alt.X("fiscal_year:O", title="Fiscal year"),
-                y=alt.Y("billions:Q", title="$ billions", scale=alt.Scale(zero=False)),
+                y=alt.Y(
+                    "billions:Q",
+                    title="$ billions",
+                    scale=alt.Scale(zero=False),
+                ),
                 color=alt.Color(
                     "series:N",
                     scale=alt.Scale(
@@ -295,7 +341,9 @@ if __name__ == "__main__":
                 tooltip=[
                     alt.Tooltip("fiscal_year:O", title="Fiscal year"),
                     alt.Tooltip("series:N", title="Series"),
-                    alt.Tooltip("billions:Q", title="$ billions", format=".2f"),
+                    alt.Tooltip(
+                        "billions:Q", title="$ billions", format=".2f"
+                    ),
                 ],
             )
         )
@@ -317,14 +365,18 @@ if __name__ == "__main__":
             )
         else:
             compare_base = compare.index.min()
-            st.subheader(f"Funding vs. outcomes, indexed (FY{compare_base} = 100)")
+            st.subheader(
+                f"Funding vs. outcomes, indexed (FY{compare_base} = 100)"
+            )
             indexed = (compare / compare.loc[compare_base] * 100).reset_index()
             indexed_long = indexed.melt(
                 "fiscal_year", var_name="series", value_name="index"
             )
             indexed_long["actual"] = (
                 compare.reset_index()
-                .melt("fiscal_year", var_name="series", value_name="actual")["actual"]
+                .melt("fiscal_year", var_name="series", value_name="actual")[
+                    "actual"
+                ]
                 .round(2)
             )
             color_scale = alt.Scale(
@@ -333,7 +385,8 @@ if __name__ == "__main__":
             lines = (
                 alt.Chart(indexed_long)
                 .mark_line(
-                    point=alt.OverlayMarkDef(size=70, filled=True), strokeWidth=2
+                    point=alt.OverlayMarkDef(size=70, filled=True),
+                    strokeWidth=2,
                 )
                 .encode(
                     x=alt.X("fiscal_year:O", title="Fiscal year"),
@@ -345,7 +398,9 @@ if __name__ == "__main__":
                     color=alt.Color(
                         "series:N",
                         scale=color_scale,
-                        legend=alt.Legend(title=None, orient="top", labelLimit=260),
+                        legend=alt.Legend(
+                            title=None, orient="top", labelLimit=260
+                        ),
                     ),
                     tooltip=[
                         alt.Tooltip("fiscal_year:O", title="Fiscal year"),
@@ -367,14 +422,18 @@ if __name__ == "__main__":
             )
 
             st.subheader("Each fiscal year: funding vs. outcomes")
-            outcomes = [m for m in metrics if m != "FDA funding (inflation adjusted)"]
+            outcomes = [
+                m for m in metrics if m != "FDA funding (inflation adjusted)"
+            ]
             scatter = compare.reset_index().melt(
                 ["fiscal_year", "FDA funding (inflation adjusted)"],
                 value_vars=outcomes,
                 var_name="outcome",
                 value_name="value",
             )
-            scatter["label"] = "FY" + scatter["fiscal_year"].astype(str).str[-2:]
+            scatter["label"] = (
+                "FY" + scatter["fiscal_year"].astype(str).str[-2:]
+            )
             scatter_base = alt.Chart().encode(
                 x=alt.X(
                     "FDA funding (inflation adjusted):Q",
@@ -402,7 +461,8 @@ if __name__ == "__main__":
                 alt.layer(points, point_labels, data=scatter)
                 .properties(width=220, height=220)
                 .facet(
-                    facet=alt.Facet("outcome:N", title=None, sort=outcomes), columns=3
+                    facet=alt.Facet("outcome:N", title=None, sort=outcomes),
+                    columns=3,
                 )
                 .resolve_scale(y="independent")
             )
