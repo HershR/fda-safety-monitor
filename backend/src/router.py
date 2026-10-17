@@ -1,12 +1,7 @@
 from fastapi import APIRouter
-from src.api.routes import (
-    cdc,
-    fiscal_years,
-    recall_scraper,
-    state_monthly_summary,
-    states,
-    usaspending,
-)
+
+from src.collectors import cdc, fda_recalls, usaspending
+from src.routes import fiscal_years, state_monthly_summary, states
 
 api_router = APIRouter()
 
@@ -15,7 +10,7 @@ api_router.include_router(
 )
 api_router.include_router(states.router, prefix="/states", tags=["States"])
 api_router.include_router(
-    recall_scraper.router, prefix="/fda-recalls", tags=["FDARecalls"]
+    fda_recalls.router, prefix="/fda-recalls", tags=["FDARecalls"]
 )
 api_router.include_router(
     usaspending.router, prefix="/usaspending", tags=["USASpending"]

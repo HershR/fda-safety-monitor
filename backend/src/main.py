@@ -2,8 +2,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from src.api.router import api_router
 from src.database import create_db_and_tables
+from src.router import api_router
 from src.seed_db import seed_db
 
 

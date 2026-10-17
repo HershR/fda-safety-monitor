@@ -2,11 +2,10 @@ import requests
 from fastapi import APIRouter, HTTPException
 from sqlmodel import select
 from src.database import SessionDep
+from src.db_utils import save_rows
 from src.enums import PathogenSource
-from src.gcp_service import get_bucket, get_credientials
 from src.models import IllnessMonthly, State
-from src.utils.pipeline.bucket_utils import save_raw
-from src.utils.pipeline.db_utils import save_rows
+from src.storage import get_bucket, get_credientials, save_raw
 from uuid6 import uuid7
 
 router = APIRouter()
