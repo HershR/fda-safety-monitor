@@ -1,7 +1,8 @@
-name: fda-monitor-backend
+name: fda-monitor
 services:
   server:
     build:
+      context: ./backend
       dockerfile: Dockerfile
     command: ["fastapi", "dev", "src/main.py", "--host", "0.0.0.0", "--port", "8080"]
     depends_on:
@@ -10,17 +11,30 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./src:/app/src/
-      - ./data:/app/src/data/
+      - ./backend/src:/app/src/
+      - ./backend/data:/app/src/data/
       - ${LOCAL_GCP_SERVICE_ACCOUNT_KEY}:/${GCP_SERVICE_ACCOUNT_KEY}
     environment:
       DB_HOST: db
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_NAME: ${DB_NAME}
+      # DB_USER: ${DB_USER}
+      # DB_PASSWORD: ${DB_PASSWORD}
+      # DB_NAME: ${DB_NAME}
       DB_PORT: 5432
     env_file:
-      - .env
+      - ./.env
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    command: ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.runOnSave=true"]
+    depends_on:
+      - server
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./frontend:/app/
+    environment:
+      API_BASE_URL: http://server:8080
   db:
     image: postgres:18
     restart: always

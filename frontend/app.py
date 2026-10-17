@@ -5,10 +5,7 @@ import google.auth.transport.requests
 import pandas as pd
 import requests
 import streamlit as st
-from dotenv import load_dotenv
 from google.oauth2 import id_token
-
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 api_base_url = os.getenv("API_BASE_URL", "http://localhost:8080").rstrip("/")
 
@@ -140,7 +137,7 @@ if __name__ == "__main__":
     except requests.RequestException as e:
         st.error(
             f"Could not reach the API at {api_base_url}. Check that the backend "
-            f"is running and that API_BASE_URL in frontend/.env is correct.\n\n{e}"
+            f"is running.\n\n{e}"
         )
         st.stop()
 
