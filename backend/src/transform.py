@@ -32,7 +32,7 @@ def month_range(year_month: str) -> tuple[date, date]:
         end_year = year + 1
         end_month = 1
     else:
-        end_year = 1
+        end_year = year
         end_month = month + 1
     end = date(end_year, end_month, 1)
     return start, end
