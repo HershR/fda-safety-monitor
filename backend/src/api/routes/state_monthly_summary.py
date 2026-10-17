@@ -133,14 +133,14 @@ def rebuild_month(
         select(RecallEvent).where(
             RecallEvent.report_date >= start,
             RecallEvent.report_date < end,
-            RecallEvent.state_code.is_not(None),
+            RecallEvent.state_code.is_not(None),  # type: ignore
         )
     ).all()
     illness = session.exec(
         select(IllnessMonthly).where(IllnessMonthly.year_month == year_month)
     ).all()
     rows = build_month(year_month, fiscal_year, state_codes, events, illness)
-    return save_rows(session, rows, True)
+    return save_rows(session, rows, True)  # type: ignore
 
 
 def rebuild_months(session: Session, months: list[str]) -> int:
@@ -183,7 +183,7 @@ def get_state_monthly_summaries(
     """List summary rows, filtered by states, calendar years or fiscal year"""
     statement = select(StateMonthlySummary)
     if states:
-        statement = statement.where(StateMonthlySummary.state_code.in_(states))
+        statement = statement.where(StateMonthlySummary.state_code.in_(states))  # type: ignore
     if start_year:
         statement = statement.where(
             StateMonthlySummary.year_month >= f"{start_year}-01"
@@ -213,7 +213,7 @@ def get_state_monthly_summary(
         StateMonthlySummary.year_month == year_month
     )
     if states:
-        statement = statement.where(StateMonthlySummary.state_code.in_(states))
+        statement = statement.where(StateMonthlySummary.state_code.in_(states))  # type: ignore
     statement = statement.order_by(StateMonthlySummary.state_code)
     results = session.exec(statement).all()
     if not results:
