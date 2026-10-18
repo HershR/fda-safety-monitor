@@ -21,7 +21,7 @@ The dashboard looks at whether cuts to FDA funding lead to fewer or slower food 
 ---
 
 ## Problem Statement
-With the budget cuts to FDA by the current administration, we wanted to see if they have had an adverse effect on food safety in the USA. We track FDA spending over the years along with food recall activity: the number of recalls, how severe they are, and how long FDA takes to classify them. Alongside this, we track foodborne illness reported by the CDC. We expect lower funding to lead to fewer or slower recalls and in turn more people getting sick due to the delay.
+With the budget cuts to FDA by the current administration, we wanted to see if they have had an adverse effect on food safety in the USA. We track FDA spending over the years along with food recall activity: the number of recalls, how severe they are, and how long FDA takes to classify them. Alongside this, we track foodborne illness reported by the CDC. We expect lower funding to lead to fewer or slower recalls and in turn more people getting sick.
 
 ## Data Sources and Integration Goal
 
@@ -32,16 +32,16 @@ All four sources are free, public, and need no API key. Last checked 2026-09-30.
 | --- | --- | --- | --- | --- | --- |
 | 1 | [openFDA Food Enforcement](https://api.fda.gov/food/enforcement.json) | API | Official FDA food recalls from 2012 on. Includes recall class, company state, and initiation, classification, and report dates | Weekly | None |
 | 2 | [FDA Recall Announcements](https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts) | Scraped | Recall announcements as companies post them: date, brand, product, category, reason, company. No state field | Daily | None |
-| 3 | [CDC BEAM Dashboard](https://data.cdc.gov/Foodborne-Waterborne-and-Related-Diseases/BEAM-Dashboard-Report-Data/jbhn-e8xn/about_data) | API | Lab confirmed Salmonella, STEC, Campylobacter, Shigella, and Vibrio samples by state, month, and source type | Monthly | None |
+| 3 | [CDC BEAM Dashboard](https://data.cdc.gov/Foodborne-Waterborne-and-Related-Diseases/BEAM-Dashboard-Report-Data/jbhn-e8xn/about_data) | API | Lab-confirmed Salmonella, STEC, Campylobacter, Shigella, and Vibrio samples by state, month, and source type | Monthly | None |
 | 4 | [USASpending](https://api.usaspending.gov/api/v2/agency/075/sub_agency/?fiscal_year=2025) | API | FDA spending by fiscal year, listed under HHS (agency 075) | Daily | None |
 
 
 ### Integration Goal
-USASpending shows how much FDA spends each fiscal year. openFDA lists official food recalls after FDA has reviewed them, including how serious each one was and how long the review took. The FDA announcements page posts company press release when a recall starts, often weeks before the FDA reviews and classifis it. CDC BEAM counts lab-confirmed illnesses from food. 
+USASpending shows how much FDA spends each fiscal year. openFDA lists official food recalls after FDA has reviewed them, including how serious each one was and how long the review took. The FDA announcements page posts a company's press release when a recall starts, often weeks before the FDA reviews and classifies it. CDC BEAM counts lab-confirmed illnesses from food.
 
-We track recalls and illnesses by state and month. Each recall counts towards the month the FDA reported it. FDA spending is a single number per fiscal year and applied nationally, so we compare it the totals of other fiscal years. Announcements and openFDA recalls don't share an ID, so we link them by company name and how close their dates are. Some links will be wrong or missing, but it shows which announced recalls haven't reached openFDA yet.
+We track recalls and illnesses by state and month. Each recall counts towards the month the FDA reported it. FDA spending is a single number per fiscal year and applied nationally, so we compare it with the national recall and illness totals for the same year. Announcements and openFDA recalls don't share an ID, so we link them by company name and how close their dates are. Some links will be wrong or missing, but it shows which announced recalls haven't reached openFDA yet.
 
-We use the CDC human sample counts to check the recall data. Fewer inspections could mean fewer recalls even if food isn't any safer, but illness counts come from hospitals and labs and don't depend on FDA's budget. So we could see in increase in illness even though recalls are down.
+We use the CDC human sample counts to check the recall data. Fewer inspections could mean fewer recalls even if food isn't any safer, but illness counts come from hospitals and labs and don't depend on FDA's budget. So we could see an increase in illness even though recalls are down.
 
 ---
 
