@@ -172,7 +172,6 @@ def rebuild_all(session: Session) -> int:
     return rebuild_months(session, all_months(last_report))
 
 
-# Announcements usually come out on or shortly after the day the recall starts
 DAYS_BEFORE_INITIATION = 7
 DAYS_AFTER_INITIATION = 30
 MIN_COMPANY_SIMILARITY = 0.85
@@ -203,7 +202,7 @@ def is_same_company(a: str, b: str) -> bool:
 def find_recall_event(
     session: Session, announcement: RecallAnnouncement
 ) -> RecallEvent | None:
-    """Recall event from the same company that started closest to the announcement"""
+    """Find a recall event from the same company that started closest to the announcement"""
     announced = announcement.announce_date
     events = session.exec(
         select(RecallEvent).where(
@@ -229,7 +228,8 @@ def find_recall_event(
 
 def match_announcements(session: Session) -> int:
     """
-    Link unmatched announcements to their openFDA recall event.
+    Attempts to link unmatched announcements to a openFDA recall event.
+    Not a bullet proof solution. Looks at date ranges and company name similarites
     Does not commit, returns the number of announcements matched.
     """
     announcements = session.exec(
