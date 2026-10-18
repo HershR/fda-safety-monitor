@@ -1,8 +1,8 @@
 # FDA Safety Monitor
 
-A dashboard aims to figure out if reduction in FDA budget leads to a delay in recall announcements and increase in human/food related illnesses across the USA. We hope this dashboard proves usefull to members of congress when working on future federal budgets.
+The dashboard looks at whether cuts to FDA funding lead to fewer or slower food recalls and more foodborne illness across the US. It’s meant for journalists, public health researchers, and members of Congress working on budgets.
 
-**Live web app:** `https://fda-monitor-web-180707148327.us-east1.run.app`
+**Live web app:** https://fda-monitor-web-180707148327.us-east1.run.app
 
 **API (private):** In submission doc
 
@@ -21,8 +21,7 @@ A dashboard aims to figure out if reduction in FDA budget leads to a delay in re
 ---
 
 ## Problem Statement
-
-We want to track food recall activity and foodborne illness in the USA, both current and historical, and compare it against FDA funding. We think budget cuts lead to fewer or slower recalls, which then leads to more people getting sick. The dashboard is meant for food safety journalists, public health researchers, and members of Congress working on budgets.
+With the budget cuts to FDA by the current administration, we wanted to see if they have had an adverse effect on food safety in the USA. We track FDA spending over the years along with food recall activity: the number of recalls, how severe they are, and how long FDA takes to classify them. Alongside this, we track foodborne illness reported by the CDC. We expect lower funding to lead to fewer or slower recalls and in turn more people getting sick due to the delay.
 
 ## Data Sources and Integration Goal
 
@@ -32,18 +31,17 @@ All four sources are free, public, and need no API key. Last checked 2026-09-30.
 | # | Source & Link | Method | What it contains | Update frequency | Access requirements |
 | --- | --- | --- | --- | --- | --- |
 | 1 | [openFDA Food Enforcement](https://api.fda.gov/food/enforcement.json) | API | Official FDA food recalls from 2012 on. Includes recall class, company state, and initiation, classification, and report dates | Weekly | None |
-| 2 | [FDA Recall Announcements](https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts) | Scraped | Recall announcements as companies post them: date, brand, product, category, reason, company. No state field | Daily | 30s delay between requests |
+| 2 | [FDA Recall Announcements](https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts) | Scraped | Recall announcements as companies post them: date, brand, product, category, reason, company. No state field | Daily | None |
 | 3 | [CDC BEAM Dashboard](https://data.cdc.gov/Foodborne-Waterborne-and-Related-Diseases/BEAM-Dashboard-Report-Data/jbhn-e8xn/about_data) | API | Lab confirmed Salmonella, STEC, Campylobacter, Shigella, and Vibrio samples by state, month, and source type | Monthly | None |
 | 4 | [USASpending](https://api.usaspending.gov/api/v2/agency/075/sub_agency/?fiscal_year=2025) | API | FDA spending by fiscal year, listed under HHS (agency 075) | Daily | None |
 
----
 
 ### Integration Goal
-USASpending gives us FDA spending per fiscal year. openFDA tells us when recalls happen, how serious they are, and how long FDA took to classify them. The scraped announcements show recalls before they reach openFDA. CDC BEAM shows how many people actually got sick.
+USASpending shows how much FDA spends each fiscal year. openFDA lists official food recalls after FDA has reviewed them, including how serious each one was and how long the review took. The FDA announcements page posts company press release when a recall starts, often weeks before the FDA reviews and classifis it. CDC BEAM counts lab-confirmed illnesses from food. 
 
-We join on state and year-month, and map each month to a fiscal year to match it with spending. Announcements don't share an ID with openFDA, so we try to match them on company name and a fixed timeframe around the Announcement.
+We track recalls and illnesses by state and month. Each recall counts towards the month the FDA reported it. FDA spending is a single number per fiscal year and applied nationally, so we compare it the totals of other fiscal years. Announcements and openFDA recalls don't share an ID, so we link them by company name and how close their dates are. Some links will be wrong or missing, but it shows which announced recalls haven't reached openFDA yet.
 
-We use the CDC human sample counts to check the recall data. Fewer inspections could mean fewer recalls even if food isn't any safer, but illness counts come from hospitals and labs and don't depend on FDA's budget.
+We use the CDC human sample counts to check the recall data. Fewer inspections could mean fewer recalls even if food isn't any safer, but illness counts come from hospitals and labs and don't depend on FDA's budget. So we could see in increase in illness even though recalls are down.
 
 ---
 
@@ -54,8 +52,8 @@ We use the CDC human sample counts to check the recall data. Fewer inspections c
 | --- | --- |
 | `backend/`| FastAPI server |
 | `backend/src/main.py`| app instance |
-| `backend/src/router.py` | routes |
-| `backend/src/collectors/`, data collector endpoints, each collector stores raw data in a gcp bucket and cleaned data in database |
+| `backend/src/router.py` | registers routes |
+| `backend/src/collectors/`| data collector endpoints, each collector stores raw data in a gcp bucket and cleaned data in database |
 | `backend/src/transform.py`| used for creating monthly state summaries and matching Recall Announcements to Recall events (experimental) |
 | `backend/src/storage.py` | gcp bucket helpers |
 | `frontend/` | Streamlit dashboard |
@@ -151,4 +149,4 @@ Instructions [Here](SETUP_GCP.md)
 
 When deployed to Google Cloud Run, the FDA web scrapers can be blocked with a 401 unauthorized error. This only affects the collection of Recall Announcements.
 
-Matching Recall Announcements to offical Recall events is not perfect. It matches based on a timeframe and company name similarity. The wrong event could be linked, or an event could be missed. Requires a revist.
+Matching Recall Announcements to official Recall events is not perfect. It matches based on a timeframe and company name similarity. The wrong event could be linked, or an event could be missed. Requires a revisit.
