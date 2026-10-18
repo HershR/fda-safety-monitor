@@ -1,9 +1,9 @@
 # FDA Safety Monitor
 
-A dashboard that tracks US food recalls and foodborne illness alongside FDA spending.
-This project aim to figure out if reduction in FDA budget leads to a delay in recall announcements and increase in human/food related illnesses across the USA. We hope this dashboard proves usefull to members of congress when working on future budgets.
+A dashboard aims to figure out if reduction in FDA budget leads to a delay in recall announcements and increase in human/food related illnesses across the USA. We hope this dashboard proves usefull to members of congress when working on future federal budgets.
 
 **Live web app:** `https://fda-monitor-web-180707148327.us-east1.run.app`
+
 **API (private):** In submission doc
 
 ---
@@ -13,7 +13,7 @@ This project aim to figure out if reduction in FDA budget leads to a delay in re
 | Name | GitHubID | Role / Focus |
 | --- | --- | --- |
 | Chris | tophercruzio | Data Engineer. Data cleaning and api endpoints FDA |
-| Hersh | HershR | Backend/Database engineer |
+| Hersh | HershR | Backend/Database engineer, data transformers |
 | Paul | pryu11 | Data Engineer. Data cleaning and api endpoints Funding and CDC |
 | Carlos | ccamposlozano | GCP Deployment Engineer |
 | Dylan | DylanSidhu03 | Frontend engineer and Dashboard visualizations |
@@ -41,7 +41,7 @@ All four sources are free, public, and need no API key. Last checked 2026-09-30.
 ### Integration Goal
 USASpending gives us FDA spending per fiscal year. openFDA tells us when recalls happen, how serious they are, and how long FDA took to classify them. The scraped announcements show recalls before they reach openFDA. CDC BEAM shows how many people actually got sick.
 
-We join on state and year-month, and map each month to a fiscal year to match it with spending. Announcements don't share an ID with openFDA, so we match them on company, product, and a two-week date window.
+We join on state and year-month, and map each month to a fiscal year to match it with spending. Announcements don't share an ID with openFDA, so we try to match them on company name and a fixed timeframe around the Announcement.
 
 We use the CDC human sample counts to check the recall data. Fewer inspections could mean fewer recalls even if food isn't any safer, but illness counts come from hospitals and labs and don't depend on FDA's budget.
 
@@ -49,14 +49,14 @@ We use the CDC human sample counts to check the recall data. Fewer inspections c
 
 ## Repository Structure
 
-### Where to find things
+### Important files
 | File | Description |
 | --- | --- |
 | `backend/`| FastAPI server |
 | `backend/src/main.py`| app instance |
 | `backend/src/router.py` | routes |
 | `backend/src/collectors/`, data collector endpoints, each collector stores raw data in a gcp bucket and cleaned data in database |
-| `backend/src/transform.py`| used for creating monthly state summaries |
+| `backend/src/transform.py`| used for creating monthly state summaries and matching Recall Announcements to Recall events (experimental) |
 | `backend/src/storage.py` | gcp bucket helpers |
 | `frontend/` | Streamlit dashboard |
 | `gcloud_command.sh` | GCP setup file |
@@ -108,7 +108,7 @@ FastAPI docs are at http://localhost:8080/docs when running locally. The deploye
 
 | Method | Path | Purpose | Returns |
 | --- | --- | --- | --- |
-| `POST` | `/fda-recalls/scrape/` | pull openFDA recalls + FDA announcements | Run id + number of rows altered |
+| `POST` | `/fda-recalls/scrape/` | pull openFDA recalls + FDA announcements, then match announcements to recalls | Run id + number of rows altered + announcements matched |
 | `POST` | `/cdc/scrape/` | pull CDC BEAM monthly isolates by state/pathogen | Run id + number of rows altered |
 | `POST` | `/usaspending/scrape/` | pull FDA spending per fiscal year | Run id + number of rows altered |
 
@@ -117,14 +117,15 @@ FastAPI docs are at http://localhost:8080/docs when running locally. The deploye
 | Method | Path | Purpose | Example |
 | --- | --- | --- | --- |
 | `GET` | `/fda-recalls/` | all recall events, newest first | |
+| `GET` | `/fda-recalls/announcements/unmatched/` | announcements not matched to an openFDA recall, newest first | |
 | `GET` | `/cdc/{state_code}` | monthly illness counts for a state | `/cdc/CA` |
 | `GET` | `/usaspending/` | all fda funding records | |
 | `GET` | `/usaspending/{fiscal_year}` | latest fda funding record for a year | `/usaspending/2025` |
 | `GET` | `/state-monthly-summary/` | recalls + illness per state per month, filterable by `states`, `start_year`, `end_year`, `fiscal_year` | `/state-monthly-summary/?states=CA&start_year=2020&end_year=2024` |
-| `GET` | `/state-monthly-summary/{year_month}` | fetch one month, filterable by states | `/state-monthly-summary/2025-03?state=CA&states=TX` |
+| `GET` | `/state-monthly-summary/{year_month}` | fetch one month, filterable by states | `/state-monthly-summary/2025-03?states=CA&states=TX` |
 | `POST` | `/state-monthly-summary/rebuild/` | rebuild the summary table | |
-| `POST` | `/state-monthly-summary/rebuild/{year}/` | rebuild all states for a single year | |
-| `POST` | `/state-monthly-summary/rebuild/{year}/{month}/` | rebuild the summary table for all state for a single month | `/state-monthly-summary/rebuild/2020/01/` |
+| `POST` | `/state-monthly-summary/rebuild/{year}` | rebuild all states for a single year | |
+| `POST` | `/state-monthly-summary/rebuild/{year}/{month}` | rebuild the summary table for all state for a single month | `/state-monthly-summary/rebuild/2020/1` |
 
 **Other tables**
 
@@ -138,13 +139,16 @@ FastAPI docs are at http://localhost:8080/docs when running locally. The deploye
 ---
 
 ## Local Setup
+
 Instructions [Here](SETUP_LOCAL.md)
+
 ## GCP Setup
+
 Instructions [Here](SETUP_GCP.md)
 
 
-## Know Issues
+## Known Issues
 
-When deployed to Google Cloud Run, the FDA web scrapers can be blocked with a 401 unauthorized error. This only effects the collection of Recall Announcments.
+When deployed to Google Cloud Run, the FDA web scrapers can be blocked with a 401 unauthorized error. This only affects the collection of Recall Announcements.
 
-Work around involves triggering the FDA scarping endpoints locally and having the local setup point to your gcp database.
+Matching Recall Announcements to offical Recall events is not perfect. It matches based on a timeframe and company name similarity. The wrong event could be linked, or an event could be missed. Requires a revist.
