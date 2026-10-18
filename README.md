@@ -1,24 +1,32 @@
 # FDA Safety Monitor
+
 A dashboard that tracks US food recalls and foodborne illness alongside FDA spending.
+This project aim to figure out if reduction in FDA budget leads to a delay in recall announcements and increase in human/food related illnesses across the USA. We hope this dashboard proves usefull to members of congress when working on future budgets.
+
+**Live web app:** `https://fda-monitor-web-180707148327.us-east1.run.app`
+**API (private):** In submission doc
+
+---
 
 ## Team Members
 
 | Name | GitHubID | Role / Focus |
 | --- | --- | --- |
-| Chris | tophercruzio | Data Engineer. Data cleaning and api endpoints |
+| Chris | tophercruzio | Data Engineer. Data cleaning and api endpoints FDA |
 | Hersh | HershR | Backend/Database engineer |
-| Paul | pryu11 | Data Engineer. Data cleaning and api endpoints |
+| Paul | pryu11 | Data Engineer. Data cleaning and api endpoints Funding and CDC |
 | Carlos | ccamposlozano | GCP Deployment Engineer |
 | Dylan | DylanSidhu03 | Frontend engineer and Dashboard visualizations |
 
 ---
 
 ## Problem Statement
+
 We want to track food recall activity and foodborne illness in the USA, both current and historical, and compare it against FDA funding. We think budget cuts lead to fewer or slower recalls, which then leads to more people getting sick. The dashboard is meant for food safety journalists, public health researchers, and members of Congress working on budgets.
 
----
+## Data Sources and Integration Goal
 
-## Data Sources
+### Data Sources
 All four sources are free, public, and need no API key. Last checked 2026-09-30.
 
 | # | Source & Link | Method | What it contains | Update frequency | Access requirements |
@@ -30,7 +38,7 @@ All four sources are free, public, and need no API key. Last checked 2026-09-30.
 
 ---
 
-## Integration Goal
+### Integration Goal
 USASpending gives us FDA spending per fiscal year. openFDA tells us when recalls happen, how serious they are, and how long FDA took to classify them. The scraped announcements show recalls before they reach openFDA. CDC BEAM shows how many people actually got sick.
 
 We join on state and year-month, and map each month to a fiscal year to match it with spending. Announcements don't share an ID with openFDA, so we match them on company, product, and a two-week date window.
@@ -39,152 +47,104 @@ We use the CDC human sample counts to check the recall data. Fewer inspections c
 
 ---
 
-## Setup Instructions (Locally)
-
-### Prerequisites
-- Python 3.13
-- Docker Desktop
-- A GCP service account JSON key with write access to the project's Cloud Storage bucket
-
-### 1. Clone the repository
-```bash
-git clone https://github.com/HershR/fda-safety-monitor.git
-cd fda-safety-monitor
-```
-
-### 2. Install dependencies
-```bash
-# install deps for both backend and frontend
-# for local development
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt 
-pre-commit install
-```
-
-### 3. Configure environment variables
-```bash
-cd backend
-cp .env.template .env
-```
-
-Fill in `DB_PASSWORD` and the GCP values in `.env`.
-
-| Variable | Description | Example |
-| --- | --- | --- |
-| `DB_NAME` | Database name | `fda_data` |
-| `DB_HOST` | Database host (set to `db` inside Docker) | `localhost` |
-| `DB_PORT` | Database port | `5432` |
-| `DB_USER` | Database user | `postgres` |
-| `DB_PASSWORD` | Database password | `your-db-password` |
-| `GCP_PROJECT_ID` | GCP project ID | `your-project-name` |
-| `GCP_BUCKET_NAME` | Bucket the scraper writes to | `fda-monitor-raw` |
-| `GCP_SERVICE_ACCOUNT_KEY` | Path to the key inside the container | `/tmp/gcp-key.json` |
-| `LOCAL_GCP_SERVICE_ACCOUNT_KEY` | Path to the key on your machine | `/Users/you/keys/gcp-key.json` |
-
-Docker mounts `LOCAL_GCP_SERVICE_ACCOUNT_KEY` into the container at `GCP_SERVICE_ACCOUNT_KEY`, so the local path must be set before starting the containers.
-
-### 4. Start the backend
-From `backend/`:
-```bash
-docker compose up -d
-```
-
-The API runs at http://localhost:8080 (docs at `/docs`) and Postgres at `localhost:5439`. On startup the server fills the `state` and `fiscal_year` tables from `backend/data/`. The server reloads on code changes. If it doesn't, or you changed `requirements.txt`, rebuild:
-```bash
-docker compose up --build -d
-```
-
-Stop the containers:
-```bash
-docker compose down
-```
-
-Stop the containers and delete the database:
-```bash
-docker compose down -v
-```
-
-### 5. Call the API
-Each scraper pulls data from one source and saves it as JSON in the bucket:
-```python
-import requests
-
-requests.post(
-    "http://localhost:8080/fda-recalls/scrape/"
-).json()  # openFDA recalls + FDA announcements
-requests.post("http://localhost:8080/cdc/scrape/").json()  # CDC BEAM illness counts
-requests.post("http://localhost:8080/usaspending/scrape/").json()  # FDA spending
-```
-
-Each response has the number of rows written for each table. See [backend/README.md](backend/README.md) for the full list of routes.
-
-### 6. Run the dashboard
-The dashboard reads data from the API, so keep the backend from step 4 running and run the scrapers in step 5 first. Open a second terminal at the repository root:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate        
-pip install -r frontend/requirements.txt
-cp frontend/.env.template frontend/.env
-streamlit run frontend/app.py
-```
-
-The dashboard opens at http://localhost:8501.
-
-| Variable | Description | Example |
-| --- | --- | --- |
-| `API_BASE_URL` | URL of the backend API | `http://localhost:8080` |
-
-The default `API_BASE_URL` matches the local Docker backend, so `frontend/.env` doesn't need changes. If a section says there is no data yet, run that source's scraper in step 5. If the page says it could not reach the API, check that the backend containers are running with `docker compose ps` from `backend/`.
-
-
----
-
-## Deployment
-
-See the [GCP deployment guide](documents/gcp-deployment.md) for backend configuration,
-deployment, verification, and rollback instructions.
-
----
-
 ## Repository Structure
+
+### Where to find things
+| File | Description |
+| --- | --- |
+| `backend/`| FastAPI server |
+| `backend/src/main.py`| app instance |
+| `backend/src/router.py` | routes |
+| `backend/src/collectors/`, data collector endpoints, each collector stores raw data in a gcp bucket and cleaned data in database |
+| `backend/src/transform.py`| used for creating monthly state summaries |
+| `backend/src/storage.py` | gcp bucket helpers |
+| `frontend/` | Streamlit dashboard |
+| `gcloud_command.sh` | GCP setup file |
+| `.env.template` | local development env template |
+
 ```
 .
 ├── backend/
-│   ├── data/
-│   │   ├── fiscal_years.json
-│   │   └── state_codes.json
 │   ├── src/
-│   │   ├── api/
-│   │   │   ├── routes/
-│   │   │   │   ├── cdc.py
-│   │   │   │   ├── fiscal_years.py
-│   │   │   │   ├── recall_scraper.py
-│   │   │   │   ├── states.py
-│   │   │   │   └── usaspending.py
-│   │   │   └── router.py
 │   │   ├── main.py
+│   │   ├── router.py
+│   │   ├── collectors/          # fda_recalls.py, cdc.py, usaspending.py
+│   │   ├── routes/              # states.py, fiscal_years.py, state_monthly_summary.py
+│   │   ├── transform.py
+│   │   ├── storage.py
+│   │   ├── db_utils.py
 │   │   ├── models.py
 │   │   ├── database.py
 │   │   ├── seed_db.py
-│   │   ├── gcp_service.py
 │   │   ├── config.py
 │   │   └── enums.py
+│   ├── data/                    # fiscal_years.json, state_codes.json
+│   ├── tests/
 │   ├── Dockerfile
-│   ├── docker-compose.yaml
-│   ├── requirements.txt
-│   ├── .dockerignore
-│   ├── .env.template
-│   └── README.md
+│   └── requirements.txt
 ├── frontend/
 │   ├── app.py
-│   └── .env.template
+│   ├── Dockerfile
+│   └── requirements.txt
 ├── documents/
+│   ├── gcp-deployment.md
 │   └── postgres-erd.md
+├── .env.template
+├── docker-compose.yaml
+├── docker-compose.gcs-mock.yaml
+├── gcloud_command.sh
 ├── requirements.txt
-├── .gitattributes
-├── .pre-commit-config.yaml
-├── .python-version
+├── SETUP_LOCAL.md
+├── SETUP_GCP.md
 └── README.md
 ```
+---
+
+## API Endpoints
+
+FastAPI docs are at http://localhost:8080/docs when running locally. The deployed API is private, so use `gcloud run services proxy <API_SERVICE> --region <REGION> --port 8080` and open the same URL.
+
+**Collectors** (called by Cloud Scheduler)
+
+| Method | Path | Purpose | Returns |
+| --- | --- | --- | --- |
+| `POST` | `/fda-recalls/scrape/` | pull openFDA recalls + FDA announcements | Run id + number of rows altered |
+| `POST` | `/cdc/scrape/` | pull CDC BEAM monthly isolates by state/pathogen | Run id + number of rows altered |
+| `POST` | `/usaspending/scrape/` | pull FDA spending per fiscal year | Run id + number of rows altered |
+
+**Data**
+
+| Method | Path | Purpose | Example |
+| --- | --- | --- | --- |
+| `GET` | `/fda-recalls/` | all recall events, newest first | |
+| `GET` | `/cdc/{state_code}` | monthly illness counts for a state | `/cdc/CA` |
+| `GET` | `/usaspending/` | all fda funding records | |
+| `GET` | `/usaspending/{fiscal_year}` | latest fda funding record for a year | `/usaspending/2025` |
+| `GET` | `/state-monthly-summary/` | recalls + illness per state per month, filterable by `states`, `start_year`, `end_year`, `fiscal_year` | `/state-monthly-summary/?states=CA&start_year=2020&end_year=2024` |
+| `GET` | `/state-monthly-summary/{year_month}` | fetch one month, filterable by states | `/state-monthly-summary/2025-03?state=CA&states=TX` |
+| `POST` | `/state-monthly-summary/rebuild/` | rebuild the summary table | |
+| `POST` | `/state-monthly-summary/rebuild/{year}/` | rebuild all states for a single year | |
+| `POST` | `/state-monthly-summary/rebuild/{year}/{month}/` | rebuild the summary table for all state for a single month | `/state-monthly-summary/rebuild/2020/01/` |
+
+**Other tables**
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/states/`, `/states/{state_code}` | get state codes and names |
+| `GET` | `/fiscal_years/`, `/fiscal_years/{year}` | get fiscal year start/end dates |
+| `POST` | `/states/find_or_create`, `/fiscal_years/find_or_create` | add a row if it doesn't exist |
+| `GET` | `/` | health check |
+
+---
+
+## Local Setup
+Instructions [Here](SETUP_LOCAL.md)
+## GCP Setup
+Instructions [Here](SETUP_GCP.md)
+
+
+## Know Issues
+
+When deployed to Google Cloud Run, the FDA web scrapers can be blocked with a 401 unauthorized error. This only effects the collection of Recall Announcments.
+
+Work around involves triggering the FDA scarping endpoints locally and having the local setup point to your gcp database.
