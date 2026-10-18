@@ -1,7 +1,9 @@
+import re
 from collections import defaultdict
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
+from difflib import SequenceMatcher
 from statistics import median
 
 from fastapi import HTTPException
@@ -12,6 +14,7 @@ from src.enums import PathogenSource
 from src.models import (
     FiscalYear,
     IllnessMonthly,
+    RecallAnnouncement,
     RecallEvent,
     State,
     StateMonthlySummary,
@@ -167,3 +170,80 @@ def rebuild_all(session: Session) -> int:
     if last_report is None:
         return 0
     return rebuild_months(session, all_months(last_report))
+
+
+# Announcements usually come out on or shortly after the day the recall starts
+DAYS_BEFORE_INITIATION = 7
+DAYS_AFTER_INITIATION = 30
+MIN_COMPANY_SIMILARITY = 0.85
+COMPANY_SUFFIXES = {
+    "inc",
+    "llc",
+    "co",
+    "corp",
+    "corporation",
+    "company",
+    "ltd",
+}
+
+
+def clean_company(name: str) -> str:
+    # remove puntuation and common suffixes
+    words = re.sub(r"[^a-z0-9 ]", " ", name.lower()).split()
+    return " ".join(w for w in words if w not in COMPANY_SUFFIXES)
+
+
+def is_same_company(a: str, b: str) -> bool:
+    similarity = SequenceMatcher(
+        None, clean_company(a), clean_company(b)
+    ).ratio()
+    return similarity >= MIN_COMPANY_SIMILARITY
+
+
+def find_recall_event(
+    session: Session, announcement: RecallAnnouncement
+) -> RecallEvent | None:
+    """Recall event from the same company that started closest to the announcement"""
+    announced = announcement.announce_date
+    events = session.exec(
+        select(RecallEvent).where(
+            RecallEvent.recall_initiation_date
+            >= announced - timedelta(days=DAYS_AFTER_INITIATION),
+            RecallEvent.recall_initiation_date
+            <= announced + timedelta(days=DAYS_BEFORE_INITIATION),
+        )
+    ).all()
+
+    same_company = [
+        e
+        for e in events
+        if is_same_company(announcement.company, e.recalling_firm)
+    ]
+    if not same_company:
+        return None
+    return min(
+        same_company,
+        key=lambda e: abs((e.recall_initiation_date - announced).days),
+    )
+
+
+def match_announcements(session: Session) -> int:
+    """
+    Link unmatched announcements to their openFDA recall event.
+    Does not commit, returns the number of announcements matched.
+    """
+    announcements = session.exec(
+        select(RecallAnnouncement).where(
+            RecallAnnouncement.event_id.is_(None)  # type: ignore
+        )
+    ).all()
+
+    matched = 0
+    for announcement in announcements:
+        event = find_recall_event(session, announcement)
+        if event:
+            announcement.event_id = event.event_id
+            announcement.in_openfda = True
+            session.add(announcement)
+            matched += 1
+    return matched
