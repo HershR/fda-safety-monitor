@@ -200,9 +200,9 @@ def is_same_company(a: str, b: str) -> bool:
 
 
 def find_recall_event(
-    session: Session, announcement: RecallAnnouncement
+    session: Session, announcement: RecallAnnouncement, taken: set[str]
 ) -> RecallEvent | None:
-    """Find a recall event from the same company that started closest to the announcement"""
+    """Find a recall event from the same company that started closest to the announcement."""
     announced = announcement.announce_date
     events = session.exec(
         select(RecallEvent).where(
@@ -216,7 +216,8 @@ def find_recall_event(
     same_company = [
         e
         for e in events
-        if is_same_company(announcement.company, e.recalling_firm)
+        if e.event_id not in taken
+        and is_same_company(announcement.company, e.recalling_firm)
     ]
     if not same_company:
         return None
@@ -233,17 +234,19 @@ def match_announcements(session: Session) -> int:
     Does not commit, returns the number of announcements matched.
     """
     announcements = session.exec(
-        select(RecallAnnouncement).where(
-            RecallAnnouncement.event_id.is_(None)  # type: ignore
-        )
+        select(RecallAnnouncement)
+        .where(RecallAnnouncement.event_id.is_(None))  # type: ignore
+        .order_by(RecallAnnouncement.announce_date)
     ).all()
 
+    taken: set[str] = set()
     matched = 0
     for announcement in announcements:
-        event = find_recall_event(session, announcement)
+        event = find_recall_event(session, announcement, taken)
         if event:
             announcement.event_id = event.event_id
             announcement.in_openfda = True
             session.add(announcement)
+            taken.add(event.event_id)
             matched += 1
     return matched

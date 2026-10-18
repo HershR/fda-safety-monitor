@@ -11,6 +11,7 @@ from src.database import SessionDep
 from src.db_utils import save_rows
 from src.models import RecallAnnouncement, RecallEvent, RecallProduct, State
 from src.storage import get_bucket, get_credientials, save_raw
+from src.transform import match_announcements
 from uuid6 import uuid7
 
 router = APIRouter()
@@ -191,8 +192,9 @@ def scrape(session: SessionDep):
     """Scrape FDA food recalls from openFDA and FDA announcements page.
 
     Returns:
-        dict: ``run_id`` for this run, plus the number of rows saved to
-        ``recall_event``, ``recall_product``, and ``recall_announcement``.
+        dict: ``run_id`` for this run, the number of rows saved to
+        ``recall_event``, ``recall_product``, and ``recall_announcement``,
+        and how many announcements were matched to a recall event.
     Raises:
         HTTPError: If fda.gov returns an error
 
@@ -222,6 +224,11 @@ def scrape(session: SessionDep):
             status_code=502,
             detail=f"openFDA saved {saved}; FDA announcements failed: {e}",
         )
+
+    # Link announcements to openFDA events. Saving announcements above
+    # resets their event_id, so this runs on every scrape
+    saved["announcements_matched"] = match_announcements(session)
+    session.commit()
 
     return {"run_id": run_id, **saved}
 
