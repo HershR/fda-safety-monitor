@@ -244,6 +244,55 @@ if __name__ == "__main__":
             )
             st.bar_chart(state_df, x_label="State", y_label="Recall events")
 
+    st.subheader("Recall announcements not yet in openFDA (Experimental)")
+    try:
+        unmatched = pd.DataFrame(
+            retrieve_data_from_api(
+                api_base_url, "/fda-recalls/announcements/unmatched/"
+            )
+        )
+    except requests.RequestException as e:
+        st.error(f"Could not load recall announcements.\n\n{e}")
+        unmatched = pd.DataFrame()
+
+    if unmatched.empty:
+        st.info("No unmatched recall announcements.")
+    else:
+        st.caption(
+            "Companies post these announcements when a recall starts. They may "
+            "not be in openFDA yet, or the company name didn't match an openFDA "
+            "recall."
+        )
+
+        unmatched["announce_date"] = pd.to_datetime(
+            unmatched["announce_date"]
+        ).dt.date
+
+        st.metric("Unmatched announcements", len(unmatched))
+        st.dataframe(
+            unmatched[
+                [
+                    "announce_date",
+                    "company",
+                    "brand",
+                    "product",
+                    "reason",
+                    "detail_url",
+                ]
+            ],
+            hide_index=True,
+            column_config={
+                "announce_date": "Announced",
+                "company": "Company",
+                "brand": "Brand",
+                "product": "Product",
+                "reason": "Reason",
+                "detail_url": st.column_config.LinkColumn(
+                    "FDA page", display_text="View"
+                ),
+            },
+        )
+
     st.header(f"Foodborne illness in {state_names.get(selected_state)}")
     if illness.empty:
         st.info(
