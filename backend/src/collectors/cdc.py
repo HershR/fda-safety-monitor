@@ -1,13 +1,12 @@
 import requests
 from fastapi import APIRouter, HTTPException
 from sqlmodel import select
-from uuid6 import uuid7
 from src.database import SessionDep
+from src.db_utils import save_rows
 from src.enums import PathogenSource
-from src.gcp_service import get_bucket, get_credientials
 from src.models import IllnessMonthly, State
-from src.utils.pipeline.bucket_utils import save_raw
-from src.utils.pipeline.db_utils import save_rows
+from src.storage import get_bucket, get_credientials, save_raw
+from uuid6 import uuid7
 
 router = APIRouter()
 
@@ -17,6 +16,16 @@ PAGE_SIZE = 5000
 
 
 def fetch_isolates(bucket, run_id, valid_state_codes):
+    """
+    Checks the CDC BEAM Socrata API pages and fetches the
+    isolate counts by state, year, month, pathogen, source_type
+
+    Saves the raw data into the GCS bucket via save_raw().
+    Skip the row if its state code is not included in valid_state_codes.
+
+    Converts the cleaned data into an IllnessMonthly object format
+    and returns a list of objects.
+    """
     rows = []
     offset = 0
     page = 1
@@ -65,6 +74,17 @@ def fetch_isolates(bucket, run_id, valid_state_codes):
 
 @router.post("/scrape/")
 def scrape(session: SessionDep):
+    """
+    Collects monthly isolate cases by pathogen from CDC BEAM API.
+
+    Fetches valid_state_codes by checking the state table
+    and filters out non-valid state codes from CDC records.
+    Saves the raw data into the GCS bucket and
+    the cleaned data into the illness_monthly table
+
+    Returns the number of saved rows in a
+    dictionary format - {"illness_monthly": saved}
+    """
     states = session.exec(select(State)).all()
     valid_state_codes = set()
     for s in states:
@@ -75,12 +95,19 @@ def scrape(session: SessionDep):
     rows = fetch_isolates(bucket, run_id, valid_state_codes)
     saved = save_rows(session, rows)
     session.commit()
-    return {"illness_monthly": saved}
+    return {"run_id": run_id, "illness_monthly": saved}
 
 
 @router.get("/{state_code}", response_model=list[IllnessMonthly])
 def get_illness_monthly_by_state(session: SessionDep, state_code: str):
-    statement = select(IllnessMonthly).where(IllnessMonthly.state_code == state_code)
+    """
+    Returns all monthly CDC records for the given state code.
+
+    Returns 404 error if no record is found for that state.
+    """
+    statement = select(IllnessMonthly).where(
+        IllnessMonthly.state_code == state_code
+    )
     results = session.exec(statement).all()
 
     if len(results) == 0:

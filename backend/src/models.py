@@ -7,14 +7,14 @@ from src.enums import PathogenSource
 
 
 class State(SQLModel, table=True):
-    __tablename__ = "state"
+    __tablename__ = "state"  # type: ignore
 
     state_code: str = Field(primary_key=True, max_length=2)
     state_name: str
 
 
 class FiscalYear(SQLModel, table=True):
-    __tablename__ = "fiscal_year"
+    __tablename__ = "fiscal_year"  # type: ignore
 
     fiscal_year: int = Field(primary_key=True)
     fy_start: date
@@ -22,10 +22,12 @@ class FiscalYear(SQLModel, table=True):
 
 
 class RecallEvent(SQLModel, table=True):
-    __tablename__ = "recall_event"
+    __tablename__ = "recall_event"  # type: ignore
 
     event_id: str = Field(primary_key=True)
-    state_code: str | None = Field(default=None, max_length=2, foreign_key="state.state_code")
+    state_code: str | None = Field(
+        default=None, max_length=2, foreign_key="state.state_code"
+    )
     classification: str
     recall_initiation_date: date
     center_classification_date: date | None = None
@@ -33,13 +35,13 @@ class RecallEvent(SQLModel, table=True):
     status: str
     voluntary_mandated: str
     recalling_firm: str
-    classification_lag_days: int |None = None
+    classification_lag_days: int | None = None
     product_count: int
     collected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class RecallProduct(SQLModel, table=True):
-    __tablename__ = "recall_product"
+    __tablename__ = "recall_product"  # type: ignore
 
     recall_number: str = Field(primary_key=True)
     event_id: str = Field(foreign_key="recall_event.event_id")
@@ -50,7 +52,7 @@ class RecallProduct(SQLModel, table=True):
 
 
 class RecallAnnouncement(SQLModel, table=True):
-    __tablename__ = "recall_announcement"
+    __tablename__ = "recall_announcement"  # type: ignore
 
     announcement_id: str = Field(primary_key=True)
     announce_date: date
@@ -68,7 +70,7 @@ class RecallAnnouncement(SQLModel, table=True):
 
 
 class IllnessMonthly(SQLModel, table=True):
-    __tablename__ = "illness_monthly"
+    __tablename__ = "illness_monthly"  # type: ignore
 
     state_code: str = Field(
         primary_key=True, max_length=2, foreign_key="state.state_code"
@@ -81,7 +83,7 @@ class IllnessMonthly(SQLModel, table=True):
 
 
 class FDAFunding(SQLModel, table=True):
-    __tablename__ = "fda_funding"
+    __tablename__ = "fda_funding"  # type: ignore
 
     fiscal_year: int = Field(
         primary_key=True, foreign_key="fiscal_year.fiscal_year"
@@ -92,8 +94,8 @@ class FDAFunding(SQLModel, table=True):
     new_award_count: int
 
 
-class MonthlyPanel(SQLModel, table=True):
-    __tablename__ = "monthly_panel"
+class StateMonthlySummary(SQLModel, table=True):
+    __tablename__ = "state_monthly_summary"  # type: ignore
 
     state_code: str = Field(
         primary_key=True, max_length=2, foreign_key="state.state_code"
@@ -102,8 +104,8 @@ class MonthlyPanel(SQLModel, table=True):
     fiscal_year: int = Field(foreign_key="fiscal_year.fiscal_year")
     recall_events: int
     class_i_events: int
-    class_i_share: Decimal
-    median_classification_lag: Decimal
-    isolates_human: int
-    isolates_food_reference: int
+    class_i_share: Decimal | None = None
+    median_classification_lag: Decimal | None = None
+    isolates_human: int | None = None
+    isolates_food_reference: int | None = None
     calculated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

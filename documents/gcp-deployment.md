@@ -1,105 +1,153 @@
 # Backend deployment on GCP
 
-Deploy the backend to Cloud Run using [gcloud_command.sh](../gcloud_command.sh).
-The service connects to Cloud SQL and Cloud Storage, reads the database password
-from Secret Manager, and requires authenticated requests.
+[gcloud_command.sh](../gcloud_command.sh) builds the backend from
+`backend/Dockerfile` and deploys it to Cloud Run. Google Cloud builds and stores
+the image, so Docker Desktop does not need to be running.
 
-The script uses existing GCP resources. Resource creation, frontend deployment,
-and Cloud Scheduler configuration are outside its scope. For local development,
-see the [backend README](../backend/README.md).
-
-## Prerequisites
-
-- Docker and the Google Cloud CLI, authenticated with an account that can upload
-  images, deploy Cloud Run services, and use the backend service account.
-- An existing Cloud SQL database, Cloud Storage bucket, Artifact Registry Docker
-  repository, and database password secret.
-- Cloud Run, Cloud SQL Admin, Artifact Registry, and Secret Manager APIs enabled.
-- A backend service account with Cloud SQL Client, bucket write access, and
-  Secret Accessor on the database password secret. Cloud Run uses this account
-  without a JSON key file.
-
-The script connects to Cloud SQL through a `/cloudsql/` socket. Instances with
-only a private IP require additional network configuration.
+The backend is private and uses Cloud SQL, Cloud Storage, and a database password
+stored in Secret Manager. Scheduler jobs are configured. Frontend deployment is prepared for after the dashboard merge.
 
 ## Configuration
 
-Export these variables in your terminal with `export NAME=value`. Get the
-resource values from the team; do not commit passwords or service account keys.
-The script does not load `backend/.env`.
+These steps are for the person deploying the backend. Team members who only call
+the deployed API need an authorized Google account, not a local deployment file.
 
-| Variable | Value |
-| --- | --- |
-| `GCP_PROJECT_ID` | Project ID |
-| `GCP_REGION` | Region for Cloud Run and Artifact Registry |
-| `GCP_API_SERVICE` | Backend service name |
-| `GCP_REPOSITORY` | Artifact Registry Docker repository name |
-| `GCP_BACKEND_SERVICE_ACCOUNT` | Backend service account email |
-| `GCP_SQL_INSTANCE` | Connection name: `PROJECT:REGION:INSTANCE` |
-| `GCP_BUCKET_NAME` | Cloud Storage bucket name |
-| `GCP_DB_NAME` | Database name |
-| `GCP_DB_USER` | Database user; defaults to `postgres` |
-| `GCP_DB_PASSWORD_SECRET` | Password secret name, not the password |
-| `GCP_DB_SECRET_VERSION` | Secret version number |
+Install the Google Cloud CLI and sign in:
+
+```bash
+gcloud auth login
+```
+
+Before deploying, prepare a GCP project with billing enabled, a backend service
+account, a Cloud SQL PostgreSQL instance with a database and user, a Storage bucket,
+and a Secret Manager secret containing that user's database password. The script
+does not create these resources. A Cloud SQL instance with only a private IP needs
+additional network configuration.
+
+Create `deploy.local.sh` in the repository root and fill in the values for your
+project. This file is ignored by Git. The script does not load `backend/.env`.
+
+```bash
+export GCP_PROJECT_ID="YOUR_PROJECT_ID"
+export GCP_REGION="YOUR_REGION"
+export GCP_API_SERVICE="YOUR_API_SERVICE"
+export GCP_BACKEND_SERVICE_ACCOUNT="YOUR_SERVICE_ACCOUNT_EMAIL"
+export GCP_SQL_INSTANCE="YOUR_PROJECT:YOUR_SQL_REGION:YOUR_INSTANCE"
+export GCP_BUCKET_NAME="YOUR_BUCKET"
+export GCP_DB_NAME="YOUR_DATABASE"
+export GCP_DB_USER="postgres"
+export GCP_DB_PASSWORD_SECRET="YOUR_PASSWORD_SECRET"
+export GCP_DB_SECRET_VERSION="YOUR_SECRET_VERSION"
+```
+
+Use the secret's name and version, not the password itself. Cloud Run uses the
+backend service account without a downloaded JSON key.
 
 ## Deploy
 
-Run from the repository root. Use a new image tag for each release:
+Run commands from the repository root. For initial setup, after preparing the
+resources above:
 
 ```bash
-gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev"
-bash gcloud_command.sh build backend-v1
-bash gcloud_command.sh push backend-v1
+bash gcloud_command.sh all
 ```
 
-Use the digest printed by the push to deploy the uploaded image. Replace
-`IMAGE_REFERENCE` with its full address:
-`REGION-docker.pkg.dev/PROJECT/REPOSITORY/backend@sha256:DIGEST`.
+This enables the required Google APIs, grants the backend account access to Cloud
+SQL, bucket objects, and the password secret, then deploys and prints the API URL.
+Your account needs permission to enable APIs, assign those permissions, build and
+deploy the service, and use the backend service account.
+
+For later code updates:
 
 ```bash
-bash gcloud_command.sh api IMAGE_REFERENCE
+bash gcloud_command.sh api
 ```
 
-Cloud Run settings, including resource limits and timeout, are defined in
-`gcloud_command.sh`.
+This builds a new image and creates or updates the private Cloud Run service using
+the configuration in `deploy.local.sh`. No manual image build or push is needed.
+`deploy` is an alias for `api`. Running the script without an argument runs `all`,
+including the permission setup.
 
 ## Verify
 
-Get the service URL and deployed revisions:
+Show the service URL:
 
 ```bash
 bash gcloud_command.sh urls
-bash gcloud_command.sh revisions
 ```
 
-- Confirm that an unauthenticated request is rejected and an authenticated
-  request to `GET /states/` returns HTTP 200.
-- To verify data collection, call `POST /usaspending/scrape/` with authentication
-  and check the resulting Cloud Storage files and database records. This call
-  writes data; its response counts processed records, not necessarily new rows.
-
-The local configuration tests check database connection settings and credential
-selection. They do not connect to GCP or validate a deployment:
+Copy only the HTTPS address into `API_URL` below. Use a Google account with
+Cloud Run Invoker access on the service:
 
 ```bash
-python -m pip install -r backend/tests/requirements.txt
-PYTHONPATH=backend python -m pytest backend/tests/test_deployment_config.py -v
+API_URL="https://YOUR_SERVICE_URL"
+curl --fail-with-body -H "Authorization: Bearer $(gcloud auth print-identity-token)" "$API_URL/"
+curl --fail-with-body -H "Authorization: Bearer $(gcloud auth print-identity-token)" "$API_URL/states/"
 ```
 
-## Rollback
+The first request checks the API response; the second reads states from the
+database. Requests without authentication should be rejected.
 
-Inspect Cloud Run logs and revisions if a deployment fails. To restore traffic
-to a previously working revision, replace `REVISION_NAME` and run:
+For FastAPI's interactive documentation, run the local authenticated proxy and
+open `http://localhost:8080/docs` in your browser:
 
 ```bash
-bash gcloud_command.sh rollback REVISION_NAME
+source deploy.local.sh
+gcloud run services proxy "$GCP_API_SERVICE" --project="$GCP_PROJECT_ID" --region="$GCP_REGION" --port=8080
 ```
 
-Rollback changes traffic routing only; it does not undo database changes or
-bucket writes. Keep the previous image and secret version available.
+On October 13, 2026, deployment with `api` succeeded. Authenticated requests to `/`
+and `/states/` returned HTTP 200 with 59 states, and an unauthenticated request to
+`/` returned HTTP 403. Initial setup with `all`/`bootstrap`, collection and bucket
+writes, and the documentation proxy still need end-to-end verification.
 
-## Validation status
+## Scheduled collection
 
-The current script's build, push, deploy, and rollback workflow still requires
-end-to-end validation. CDC and recall collection also require validation on
-Cloud Run.
+Run `bash gcloud_command.sh scheduler` to create or update three authenticated
+Cloud Scheduler HTTP jobs. A dedicated `fda-monitor-scheduler` service account
+receives Cloud Run Invoker on the backend only. Authentication uses OIDC with the
+service URL as audience, following
+[Google's guidance](https://docs.cloud.google.com/scheduler/docs/http-target-auth).
+
+| Job | UTC schedule | Endpoint |
+| --- | --- | --- |
+| FDA recalls and announcements | Daily 10:00 | `/fda-recalls/scrape/` |
+| FDA funding | Daily 12:00 | `/usaspending/scrape/` |
+| CDC illness | First day of each month 14:00 | `/cdc/scrape/` |
+
+The backend request timeout is 25 minutes; Scheduler allows 30 minutes.
+Automatic retries are disabled to reduce overlapping historical collections.
+Scheduler delivery can still be repeated, and timed-out requests can continue
+running; inspect execution logs before manually retrying. These endpoints scan
+historical data, so verify runtime and memory usage after the first execution.
+Job creation alone does not verify that collection succeeds.
+
+## Frontend (prepared for deployment after merge)
+
+The Dockerfile and `web` command are ready for the Streamlit frontend in
+`feature/dashboard`. Application code and dependencies must arrive through the
+normal merge; they are not copied into this branch. No frontend was deployed.
+
+After merging `feature/dashboard` into the checkout containing this deployment
+configuration, review `frontend/app.py` and `frontend/requirements.txt`, then run:
+
+```bash
+bash gcloud_command.sh web
+```
+
+The command fails before contacting GCP if either file is missing or empty.
+It builds `fda-monitor-web` in the configured project and region with authenticated
+access by default. To intentionally publish a public dashboard, set
+`GCP_WEB_PUBLIC=true` before running the command. Public access exposes the data
+shown by the dashboard to anyone with the URL. Deployment is manual; merging does
+not trigger it, and `all` still deploys only the backend.
+
+A dedicated frontend service account receives backend Cloud Run Invoker access.
+`API_BASE_URL` is injected automatically; no service account key is bundled.
+The container and Cloud Run use port 8501, matching the HW3 Streamlit Dockerfile.
+Local environment files are excluded from the uploaded source and container.
+See [Google's Streamlit guide](https://docs.cloud.google.com/run/docs/quickstarts/build-and-deploy/deploy-python-streamlit-service).
+
+Before deployment, verify the merged backend provides GET `/fda-recalls/`, which
+the dashboard expects and the current backend lacks. Funding and CDC also require
+collected data. Validate rendering and authenticated API access after deployment.

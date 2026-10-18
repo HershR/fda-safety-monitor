@@ -1,17 +1,23 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
-from src.api.router import api_router
 from src.database import create_db_and_tables
+from src.router import api_router
 from src.seed_db import seed_db
 
-app = FastAPI()
-app.include_router(api_router)
 
-
-@app.on_event("startup")
-def on_startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # start up
     create_db_and_tables()
     seed_db()
+    yield
+    # shutdown
+
+
+app = FastAPI(lifespan=lifespan)
+app.include_router(api_router)
 
 
 @app.get("/")

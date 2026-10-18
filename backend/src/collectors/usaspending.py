@@ -1,25 +1,37 @@
-from datetime import date
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import requests
 from fastapi import APIRouter, HTTPException
-from sqlmodel import select
-from uuid6 import uuid7
+from sqlmodel import col, select
 from src.database import SessionDep
-from src.gcp_service import get_bucket, get_credientials
+from src.db_utils import save_rows
 from src.models import FDAFunding
-from src.utils.pipeline.bucket_utils import save_raw
-from src.utils.pipeline.db_utils import save_rows
+from src.storage import get_bucket, get_credientials, save_raw
+from uuid6 import uuid7
 
 router = APIRouter()
 
 SOURCE = "usaspending"
-TOPTIER_CODE = "075"
-USASPENDING_URL = "https://api.usaspending.gov/api/v2/agency/" + TOPTIER_CODE + "/sub_agency/"
+TOPTIER_CODE = "075"  # code for HHS; FDA is a sub-agency under HHS
+USASPENDING_URL = (
+    "https://api.usaspending.gov/api/v2/agency/"
+    + TOPTIER_CODE
+    + "/sub_agency/"
+)
 FIRST_FISCAL_YEAR = 2017
 
 
 def fetch_fda_record(fiscal_year, bucket, run_id):
+    """
+    Checks the USASpending API pages and fetches the FDA record
+    for the given fiscal year.
+
+    Once it locates the record, saves it to the GCS bucket
+    along with its metadata (fiscal_year, toptier_code).
+
+    Returns None if FDA record is not found until the last page.
+    """
     page = 1
 
     while True:
@@ -56,7 +68,16 @@ def fetch_fda_record(fiscal_year, bucket, run_id):
 
 
 def scrape_funding(bucket, run_id):
-    today = date.today()
+    """
+    Calls fetch_fda_record() between
+    the FIRST_FISCAL_YEAR(2017) and the current year.
+
+    Converts each year's record into a FDAFunding object format and
+    returns a list of objects.
+
+    Skips if record is not found in that year.
+    """
+    today = datetime.now(timezone.utc).date()
     rows = []
 
     for fiscal_year in range(FIRST_FISCAL_YEAR, today.year + 1):
@@ -78,25 +99,46 @@ def scrape_funding(bucket, run_id):
 
 @router.post("/scrape/")
 def scrape(session: SessionDep):
+    """
+    Collects FDA funding data (2017 ~ current) from USASpending API.
+
+    Saves the raw data into the GCS bucket and
+    the cleaned data into the fda_funding table
+
+    Returns the number of saved rows in a
+    dictionary format - {"fda_funding": saved}
+    """
     bucket = get_bucket(get_credientials())
     run_id = str(uuid7())
     rows = scrape_funding(bucket, run_id)
     saved = save_rows(session, rows)
     session.commit()
-    return {"fda_funding": saved}
+    return {"run_id": run_id, "fda_funding": saved}
 
 
 @router.get("/", response_model=list[FDAFunding])
 def get_fda_funding(session: SessionDep):
+    """
+    Returns all records saved in the fda_funding table.
+
+    If the same year's records were recorded over multiple days,
+    each record is saved on seperate rows.
+    """
     return session.exec(select(FDAFunding)).all()
 
 
 @router.get("/{fiscal_year}", response_model=FDAFunding)
 def get_fda_funding_by_year(session: SessionDep, fiscal_year: int):
+    """
+    Returns the most recently collected FDA funding record
+    for the given fiscal year.
+
+    Returns 404 error if no record is found in that year.
+    """
     statement = (
         select(FDAFunding)
         .where(FDAFunding.fiscal_year == fiscal_year)
-        .order_by(FDAFunding.collected_at.desc())
+        .order_by(col(FDAFunding.collected_at).desc())
     )
 
     result = session.exec(statement).first()
