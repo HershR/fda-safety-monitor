@@ -237,3 +237,15 @@ def scrape(session: SessionDep):
 def get_recall_events(session: SessionDep):
     statement = select(RecallEvent).order_by(RecallEvent.report_date.desc())
     return session.exec(statement).all()
+
+
+@router.get(
+    "/announcements/unmatched/", response_model=list[RecallAnnouncement]
+)
+def get_unmatched_announcements(session: SessionDep):
+    statement = (
+        select(RecallAnnouncement)
+        .where(RecallAnnouncement.event_id.is_(None))
+        .order_by(RecallAnnouncement.announce_date.desc())
+    )
+    return session.exec(statement).all()
