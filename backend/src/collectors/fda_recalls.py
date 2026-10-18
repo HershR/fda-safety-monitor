@@ -71,7 +71,7 @@ def scrape_announcements(bucket, run_id) -> list[RecallAnnouncement]:
                 f"Recalled Announcment Parsing Error: Missing resource link for item: [{date_cell}|{brand}|{product}|{company}]"
             )
             continue
-        url = f"{FDA} + {resource_link}"
+        url = f"{FDA}{resource_link}"
         announcements.append(
             RecallAnnouncement(
                 announcement_id=url.rstrip("/").rsplit("/", 1)[-1],
