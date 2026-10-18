@@ -1,24 +1,24 @@
+import re
 from collections import defaultdict
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
+from difflib import SequenceMatcher
 from statistics import median
-from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import HTTPException
 from sqlmodel import Session, func, select
-from src.database import SessionDep
+
+from src.db_utils import save_rows
 from src.enums import PathogenSource
 from src.models import (
     FiscalYear,
     IllnessMonthly,
+    RecallAnnouncement,
     RecallEvent,
     State,
     StateMonthlySummary,
 )
-from src.utils.pipeline.db_utils import save_rows
-
-router = APIRouter()
 
 FIRST_YEAR = 2012
 
@@ -35,7 +35,7 @@ def month_range(year_month: str) -> tuple[date, date]:
         end_year = year + 1
         end_month = 1
     else:
-        end_year = 1
+        end_year = year
         end_month = month + 1
     end = date(end_year, end_month, 1)
     return start, end
@@ -133,14 +133,14 @@ def rebuild_month(
         select(RecallEvent).where(
             RecallEvent.report_date >= start,
             RecallEvent.report_date < end,
-            RecallEvent.state_code.is_not(None),
+            RecallEvent.state_code.is_not(None),  # type: ignore
         )
     ).all()
     illness = session.exec(
         select(IllnessMonthly).where(IllnessMonthly.year_month == year_month)
     ).all()
     rows = build_month(year_month, fiscal_year, state_codes, events, illness)
-    return save_rows(session, rows, True)
+    return save_rows(session, rows, True)  # type: ignore
 
 
 def rebuild_months(session: Session, months: list[str]) -> int:
@@ -172,78 +172,81 @@ def rebuild_all(session: Session) -> int:
     return rebuild_months(session, all_months(last_report))
 
 
-@router.get("/", response_model=list[StateMonthlySummary])
-def get_state_monthly_summaries(
-    session: SessionDep,
-    states: Annotated[list[str] | None, Query()] = None,
-    start_year: int | None = None,
-    end_year: int | None = None,
-    fiscal_year: int | None = None,
-):
-    """List summary rows, filtered by states, calendar years or fiscal year"""
-    statement = select(StateMonthlySummary)
-    if states:
-        statement = statement.where(StateMonthlySummary.state_code.in_(states))
-    if start_year:
-        statement = statement.where(
-            StateMonthlySummary.year_month >= f"{start_year}-01"
+DAYS_BEFORE_INITIATION = 7
+DAYS_AFTER_INITIATION = 30
+MIN_COMPANY_SIMILARITY = 0.85
+COMPANY_SUFFIXES = {
+    "inc",
+    "llc",
+    "co",
+    "corp",
+    "corporation",
+    "company",
+    "ltd",
+}
+
+
+def clean_company(name: str) -> str:
+    # remove puntuation and common suffixes
+    words = re.sub(r"[^a-z0-9 ]", " ", name.lower()).split()
+    return " ".join(w for w in words if w not in COMPANY_SUFFIXES)
+
+
+def is_same_company(a: str, b: str) -> bool:
+    similarity = SequenceMatcher(
+        None, clean_company(a), clean_company(b)
+    ).ratio()
+    return similarity >= MIN_COMPANY_SIMILARITY
+
+
+def find_recall_event(
+    session: Session, announcement: RecallAnnouncement, taken: set[str]
+) -> RecallEvent | None:
+    """Find a recall event from the same company that started closest to the announcement."""
+    announced = announcement.announce_date
+    events = session.exec(
+        select(RecallEvent).where(
+            RecallEvent.recall_initiation_date
+            >= announced - timedelta(days=DAYS_AFTER_INITIATION),
+            RecallEvent.recall_initiation_date
+            <= announced + timedelta(days=DAYS_BEFORE_INITIATION),
         )
-    if end_year:
-        statement = statement.where(
-            StateMonthlySummary.year_month <= f"{end_year}-12"
-        )
-    if fiscal_year:
-        statement = statement.where(
-            StateMonthlySummary.fiscal_year == fiscal_year
-        )
-    statement = statement.order_by(
-        StateMonthlySummary.year_month, StateMonthlySummary.state_code
+    ).all()
+
+    same_company = [
+        e
+        for e in events
+        if e.event_id not in taken
+        and is_same_company(announcement.company, e.recalling_firm)
+    ]
+    if not same_company:
+        return None
+    return min(
+        same_company,
+        key=lambda e: abs((e.recall_initiation_date - announced).days),
     )
-    return session.exec(statement).all()
 
 
-@router.get("/{year_month}", response_model=list[StateMonthlySummary])
-def get_state_monthly_summary(
-    session: SessionDep,
-    year_month: str,
-    states: Annotated[list[str] | None, Query()] = None,
-):
-    """Get the State Monthly Summary for one month(YYYY-mm), optionally filtered by states"""
-    statement = select(StateMonthlySummary).where(
-        StateMonthlySummary.year_month == year_month
-    )
-    if states:
-        statement = statement.where(StateMonthlySummary.state_code.in_(states))
-    statement = statement.order_by(StateMonthlySummary.state_code)
-    results = session.exec(statement).all()
-    if not results:
-        raise HTTPException(
-            status_code=404,
-            detail=f"State monthly summary for {year_month} was not found",
-        )
-    return results
+def match_announcements(session: Session) -> int:
+    """
+    Attempts to link unmatched announcements to a openFDA recall event.
+    Not a bullet proof solution. Looks at date ranges and company name similarites
+    Does not commit, returns the number of announcements matched.
+    """
+    announcements = session.exec(
+        select(RecallAnnouncement)
+        .where(RecallAnnouncement.event_id.is_(None))  # type: ignore
+        .order_by(RecallAnnouncement.announce_date)
+    ).all()
 
-
-@router.post("/rebuild/")
-def rebuild(session: SessionDep):
-    """Rebuild every month from 2012 to the latest recall"""
-    return {"state_monthly_summary": rebuild_all(session)}
-
-
-@router.post("/rebuild/{year}")
-def rebuild_year(session: SessionDep, year: int):
-    """Rebuild all months of one year, up to the latest recall"""
-    months = [f"{year:04d}-{month:02d}" for month in range(1, 13)]
-    return {"state_monthly_summary": rebuild_months(session, months)}
-
-
-@router.post("/rebuild/{year}/{month}")
-def rebuild_year_month(
-    session: SessionDep, year: int, month: Annotated[int, Path(ge=1, le=12)]
-):
-    """Rebuild one month"""
-    return {
-        "state_monthly_summary": rebuild_months(
-            session, [f"{year:04d}-{month:02d}"]
-        )
-    }
+    taken: set[str] = set()
+    matched = 0
+    for announcement in announcements:
+        event = find_recall_event(session, announcement, taken)
+        if event:
+            announcement.event_id = event.event_id
+            announcement.in_openfda = True
+            session.add(announcement)
+            taken.add(event.event_id)
+            matched += 1
+    return matched

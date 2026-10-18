@@ -15,7 +15,7 @@ def save_row(session: Session, row: SQLModel, update: bool = True):
     if not row:
         return
     table = type(row)
-    pks = table.__table__.primary_key.columns.keys()
+    pks = table.__table__.primary_key.columns.keys()  # type: ignore
     new_values = row.model_dump()
     stmt = insert(table).values(new_values)
     if update:
@@ -35,7 +35,7 @@ def save_rows(session: Session, rows: list[SQLModel], update: bool = True):
         return 0
 
     table = type(rows[0])
-    pks = table.__table__.primary_key.columns.keys()
+    pks = table.__table__.primary_key.columns.keys()  # type: ignore
 
     # remove duplicate rows if any
     unique = {}
