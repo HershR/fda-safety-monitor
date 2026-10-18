@@ -113,7 +113,7 @@ def scrape(session: SessionDep):
     rows = scrape_funding(bucket, run_id)
     saved = save_rows(session, rows)
     session.commit()
-    return {"fda_funding": saved}
+    return {"run_id": run_id, "fda_funding": saved}
 
 
 @router.get("/", response_model=list[FDAFunding])

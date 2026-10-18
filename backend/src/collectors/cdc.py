@@ -95,7 +95,7 @@ def scrape(session: SessionDep):
     rows = fetch_isolates(bucket, run_id, valid_state_codes)
     saved = save_rows(session, rows)
     session.commit()
-    return {"illness_monthly": saved}
+    return {"run_id": run_id, "illness_monthly": saved}
 
 
 @router.get("/{state_code}", response_model=list[IllnessMonthly])
